@@ -22,4 +22,5 @@ htmlcov/
 # 运行时产物
 *.log
 data/*.db
+data/artifacts/
 .DS_Store

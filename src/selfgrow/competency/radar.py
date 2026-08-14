@@ -59,13 +59,21 @@ def compute_radar(framework: CompetencyFramework, answers: list[dict[str, Any]])
         key=lambda dim_id: (scores[dim_id], framework.dimension_ids().index(dim_id)),
     )
 
+    return RadarResult(
+        radar=radar,
+        scores=scores,
+        answered=answered,
+        gaps=gaps,
+        summary=summarize(framework, gaps, hint="建议作为第一周闯关主题"),
+    )
+
+
+def summarize(framework: CompetencyFramework, gaps: list[str], hint: str = "") -> str:
+    """生成测评结论：最强 / 最弱（供复测合并后重算，避免与已合并雷达不一致）。"""
     weakest = framework.get_dimension(gaps[0]) if gaps else None
     strongest = framework.get_dimension(gaps[-1]) if gaps else None
-    summary = (
-        f"你当前最强的是「{strongest.name}」，最需要修炼的是「{weakest.name}」，"
-        f"建议作为第一周闯关主题。"
-    )
-    return RadarResult(radar=radar, scores=scores, answered=answered, gaps=gaps, summary=summary)
+    tail = f"，{hint}" if hint else "。"
+    return f"你当前最强的是「{strongest.name}」，最需要修炼的是「{weakest.name}」{tail}"
 
 
 def top_gaps(framework: CompetencyFramework, radar: dict[str, int], k: int = 2) -> list[str]:
