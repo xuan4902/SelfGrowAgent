@@ -17,13 +17,16 @@
 - 全中文注释与输出；Windows 编码统一 UTF-8（写文件显式 encoding，CLI 用 sys.stdout.reconfigure）。
 - 数据模型用 dataclass + from_dict/to_dict；JSON 文件反序列化后必须校验。
 - 测试用 unittest：`python -m unittest discover -s tests -v`。
-- 运行 CLI：`python -m selfgrow.cli.main [--mode auto|interactive]`。
+- 运行 CLI：`python -m selfgrow.cli.main [--mode auto|interactive]`（或安装后 `selfgrow [--mode …]`）。
 
 ## 架构速查
 ```
 START → diagnose → plan → learn → spar → review → route
-route: 计划未完→learn(下周) | 计划完未完复测→diagnose(reassess)→plan(adjust)→learn | 复测完→graduate→END
+route(学到中途检查点 max(1,total//2) 且未复测)→diagnose(reassess)→plan(adjust)→learn(剩余周)
+route(复测完成且周数满)→graduate→END
 ```
+- 复测只更新被测维度，保留其它维度已有雷达（避免清零 bug）
+- plan_node 动态调整前需同步 plan["current_week"]=state["current_week"]（generate_plan 初始为 0）
 - checkpointer=InMemorySaver，thread_id=learner_id → 断点续学
 - 节点调用工具由代码决定，LLM 负责内容生成（保证 Mock/真模型行为一致）
 

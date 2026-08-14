@@ -11,6 +11,9 @@ requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
 keywords = ["education", "agent", "langgraph", "personalized-learning", "rag", "milvus"]
 
+[project.scripts]
+selfgrow = "selfgrow.cli.main:main"
+
 [project.optional-dependencies]
 # LangGraph 编排 + Claude 模型
 engine = [
