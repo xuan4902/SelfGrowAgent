@@ -46,7 +46,7 @@
 # 1. 安装（engine 组：langgraph + anthropic SDK）
 pip install -e ".[engine]"
 
-# 2. 跑测试（零依赖 Mock 模式，33 用例全绿即环境正常）
+# 2. 跑测试（零依赖 Mock 模式，44 用例全绿即环境正常）
 python -m unittest discover -s tests -v
 
 # 3. 自动模式完整演示（供录 Demo 视频，脚本作答跑完整闭环）
@@ -55,7 +55,11 @@ python -m selfgrow.cli.main --mode auto
 # 4. 交互模式（你实时扮演学习者：作答测评 → 选学习动作 → 与 NPC 对线 → 复盘）
 python -m selfgrow.cli.main --mode interactive
 
-# 5. 真模型模式（配置 ANTHROPIC_API_KEY 后自动切换，或显式指定）
+# 5. Web 图形界面（浏览器走完整闭环：测评单选 → 三按钮 → 对线 → 复盘 → 战报+雷达）
+pip install -e ".[web]"
+python -m selfgrow.web.app          # 打开 http://127.0.0.1:8000（安装后也可用 selfgrow-web）
+
+# 6. 真模型模式（配置 ANTHROPIC_API_KEY 后自动切换，或显式指定）
 SELFGROW_LLM=claude python -m selfgrow.cli.main
 ```
 
@@ -87,9 +91,9 @@ SELFGROW_LLM=claude python -m selfgrow.cli.main
 ```
 data/           能力框架 / 测评题库 / 情景副本 / 知识语料（自建模拟数据）
 src/selfgrow/   competency(框架+雷达) llm(Claude+Mock) rag storage(向量+SQLite)
-                agents(LangGraph 五节点+工具注册表) cli(演示入口)
-docs/           架构说明 / 数据合规 / 边界与风险
-tests/          unittest 全覆盖 + 图端到端 smoke
+                agents(LangGraph 五节点+工具注册表) cli(演示入口) web(FastAPI+SSE 图形界面)
+docs/           架构说明 / 数据合规 / 边界与风险 / 汇报演示
+tests/          unittest 全覆盖 + 图端到端 smoke + Web 会话/HTTP 端到端
 ```
 
 ## 八、工程化里程碑（git log）

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SelfGrowAgent · 自驱学习 Agent</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🧭</span>
+      <span class="brand-name">SelfGrowAgent</span>
+      <span class="brand-sub">向上管理 · 自驱成长闭环</span>
+    </div>
+    <div class="topmeta">
+      <span id="llm-badge" class="badge" title="当前 LLM 模式">…</span>
+      <span id="sid-badge" class="badge muted" title="会话 ID">-</span>
+      <button id="btn-reset" class="ghost" title="开始一个新会话">新会话</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 左侧：过程转录 -->
+    <section class="col transcript-col">
+      <div class="col-head">
+        <span>📜 学习过程</span>
+        <span id="status-line" class="status-line">就绪</span>
+      </div>
+      <div id="transcript" class="transcript"></div>
+    </section>
+
+    <!-- 右侧：交互面板（测评 / 学习动作 / 对线 / 复盘 / 战报） -->
+    <section class="col panel-col">
+      <div id="panel" class="panel"></div>
+    </section>
+  </main>
+
+  <!-- 开始弹层 -->
+  <div id="start-overlay" class="overlay">
+    <div class="start-card">
+      <h1>🎓 把「我想学 X」变成可验证的成长闭环</h1>
+      <p class="lead">诊断 → 规划 → 学 → 练 → 复盘 → 复测 → 毕业。全流程在浏览器里完成，离线可跑。</p>
+      <label class="goal-label" for="goal-input">你的学习诉求</label>
+      <textarea id="goal-input" rows="3"
+        placeholder="例如：我想提升向上管理，尤其想学会怎么跟老板汇报"></textarea>
+      <div class="start-actions">
+        <button id="btn-start" class="primary big">开始成长 🚀</button>
+      </div>
+      <p class="note">演示数据为自建模拟数据，不收集真实个人信息；输出为辅助学习建议。</p>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

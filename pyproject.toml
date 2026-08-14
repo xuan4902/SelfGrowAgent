@@ -13,6 +13,7 @@ keywords = ["education", "agent", "langgraph", "personalized-learning", "rag", "
 
 [project.scripts]
 selfgrow = "selfgrow.cli.main:main"
+selfgrow-web = "selfgrow.web.app:main"
 
 [project.optional-dependencies]
 # LangGraph 编排 + Claude 模型
@@ -23,6 +24,8 @@ engine = [
 ]
 # Milvus 向量库（生产模式，可选）
 milvus = ["pymilvus>=2.4"]
+# Web 图形界面（本地演示服务）
+web = ["fastapi>=0.110", "uvicorn>=0.27"]
 # 开发/测试
 dev = ["pytest>=8"]
 
@@ -31,3 +34,4 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "selfgrow" = []
+"selfgrow.web" = ["static/*"]

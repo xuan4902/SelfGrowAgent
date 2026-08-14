@@ -7,8 +7,11 @@
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                       CLI 演示层（交互 / auto）                 │
-│        python -m selfgrow.cli.main --mode auto|interactive      │
+│            演示层（三入口，同一套 run_graph 中断/恢复驱动）       │
+│  ① CLI 交互/auto   python -m selfgrow.cli.main --mode …        │
+│  ② CLI 语音        --mode voice（whisper + TTS，暂停打磨中）    │
+│  ③ Web 图形界面     python -m selfgrow.web.app → 127.0.0.1:8000 │
+│       FastAPI + SSE 会话线程 + 队列桥接（详见 §4）              │
 └───────────────────────────────┬────────────────────────────────┘
                                 │ run_graph（中断/恢复驱动）
 ┌───────────────────────────────▼────────────────────────────────┐
@@ -103,7 +106,7 @@ llm_mode / tools_called                 # 运行元信息 + 工具调用日志(�
 
 ## 8. 测试策略
 
-33 个 unittest，全部 mock 模式确定性运行（零 API Key）：
+44 个 committed unittest，全部 mock 模式确定性运行（零 API Key）：
 
 ```
 python -m unittest discover -s tests -v
@@ -113,3 +116,56 @@ python -m unittest discover -s tests -v
 - `test_mock_llm`：TASK 路由、CTX 注入、确定性（同输入同输出）
 - `test_rag` / `test_vector_store` / `test_storage`：检索、向量、SQLite
 - `test_graph_e2e`：全链路闭环 + 断点续学 + 动态调整 + on_interrupt 钩子
+- `test_web_session` / `test_web_app`：Web 会话层（interrupt 计数/取消/校验/并发）+ HTTP 端到端（SSE 推流）
+
+> 注：voice 语音入口（`tests/test_cli_voice.py` 等 40 例）为未提交的增强分支，稳定性仍在打磨，
+> 不入测试计数。详见 [demo_report.md](demo_report.md)。
+
+## 9. Web 图形界面（FastAPI + SSE）
+
+浏览器走完整个学习闭环的本地演示层，后端**完全复用**现有 LangGraph 图与 `run_graph`
+（含 `on_interrupt`/`on_message` 钩子），只新增「会话线程 + 队列」桥接多轮 interrupt/resume。
+
+```
+浏览器（原生 JS，fetch+ReadableStream 手写 SSE 解析，零依赖）
+   │  REST: POST /api/sessions · GET /state · POST /answer · POST /cancel · GET /api/meta
+   │  SSE:  GET /api/sessions/{sid}/events  （重放历史 → live 推流 → done 关闭）
+   ▼
+FastAPI（app.py）── SessionManager（并发上限 + janitor 清理）
+   │  每会话一个 run 线程：线程内构建 runtime/graph（sqlite 线程安全）
+   ▼
+Session（inbox 收恢复值 / events 出事件流 / history 供重放）
+   │  run_graph(answerer=QueueAnswerer, on_interrupt, on_message)
+   ▼
+LangGraph 五节点图（与 CLI 完全同一份）
+```
+
+### 事件协议（每帧 `id:` + `event:` + `data:`(JSON, ensure_ascii=False)）
+
+| type | 内容 | 用途 |
+|---|---|---|
+| `message` | `delta: [{role, content}]` | 每轮新增叙述（计划/讲解/对线/战报） |
+| `interrupt` | `payload`（与 run_graph 负载同构） | 测评/学习动作/对线/复盘四类交互 |
+| `report` | `final`（完整最终 state） | 通关战报 + 雷达前后对比 |
+| `error` / `done` | `message` / `status` | 异常 / 收尾（status=done\|error\|cancelled） |
+
+中断负载顶层单 key：`assessment`（恢复 `{"answers":[{question_id, option(0基)}]}`，
+须覆盖全部题）、`learn`（恢复 ∈ 继续问/去演练/复盘）、`spar`/`review`（自由文本）。
+连接时后端先重放 `history`，前端按事件 `id` 去重 → 断线重连/刷新零丢失。
+
+### 三个关键坑（实现时的硬约束）
+
+1. **sqlite 跨线程**：`Database()` 默认 `check_same_thread=True`，runtime/graph 必须在
+   会话 run 线程内构建（SessionManager 只持有 `runtime_factory`/`graph_factory` 工厂）。
+2. **双答串位**：`submit_answer` 在锁内先置 `running` 并清 `current_payload` 再入 inbox，
+   否则并发第二个 POST 的值会被当作下一条答案消费（HTTP 409 语义）。
+3. **current_payload 竞态**：在 `on_interrupt` 回调里与 interrupt 事件同点赋值，保证
+   事件到达时 payload 已就绪。
+
+### 启动
+
+```bash
+pip install -e ".[web]"
+python -m selfgrow.web.app        # 或安装后 selfgrow-web
+# 浏览器打开 http://127.0.0.1:8000
+```
