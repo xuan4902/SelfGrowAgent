@@ -1,0 +1,9 @@
+# SelfGrowAgent 依赖
+#
+# 核心数据层（competency/rag/storage）仅依赖 Python 标准库。
+# 引擎层（LangGraph 编排 + Claude 模型）安装：
+#   pip install -e ".[engine]"
+# Milvus 生产模式（可选）：
+#   pip install -e ".[milvus]"
+# 开发测试：
+#   pip install -e ".[dev]"

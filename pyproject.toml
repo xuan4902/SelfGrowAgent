@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "selfgrow"
+version = "0.1.0"
+description = "SelfGrowAgent —— 面向成年人的个性化自驱学习 Agent（世界人工智能开源大赛 · 教育赛道）"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+keywords = ["education", "agent", "langgraph", "personalized-learning", "rag", "milvus"]
+
+[project.optional-dependencies]
+# LangGraph 编排 + Claude 模型
+engine = [
+    "langgraph>=1.0",
+    "langchain-core>=1.0",
+    "anthropic>=0.40",
+]
+# Milvus 向量库（生产模式，可选）
+milvus = ["pymilvus>=2.4"]
+# 开发/测试
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"selfgrow" = []
