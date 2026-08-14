@@ -60,8 +60,12 @@ def run_graph(
     initial_state: dict[str, Any],
     thread_id: str,
     answerer: Answerer,
+    on_interrupt: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """把图跑到完成（处理所有 interrupt），返回最终 state。"""
+    """把图跑到完成（处理所有 interrupt），返回最终 state。
+
+    on_interrupt 可选：每次暂停时回调当前负载（用于 CLI 自动演示的实时讲解）。
+    """
     config = {"configurable": {"thread_id": thread_id}}
     first = True
     payload: dict[str, Any] | None = None
@@ -81,5 +85,7 @@ def run_graph(
         # 取第一个中断负载（多中断并发场景取首个）
         pending = snap.tasks[0]
         payload = pending.interrupts[0].value
+        if on_interrupt is not None:
+            on_interrupt(payload)
 
     return graph.get_state(config).values

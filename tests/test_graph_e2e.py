@@ -138,6 +138,25 @@ class TestGraphE2E(unittest.TestCase):
         # 断点续学语义：thread_id 复用时同一会话上下文延续
         self.assertEqual(final["goal"], "提升汇报能力")
 
+    def test_on_interrupt_hook_fires_per_pause(self) -> None:
+        """CLI auto 模式的讲解钩子：每次暂停都应收到中断负载。"""
+        seen: list[str] = []
+
+        def hook(payload: dict[str, Any]) -> None:
+            seen.extend(payload.keys())
+
+        db = Database(path=":memory:")
+        rt = default_runtime(db=db)
+        graph = build_graph(runtime=rt)
+        init = new_initial_state("hook_01", "提升向上沟通")
+        run_graph(graph, init, thread_id="hook_01", answerer=ScriptedAnswerer(), on_interrupt=hook)
+        self.assertIn("assessment", seen)
+        self.assertIn("learn", seen)
+        self.assertIn("spar", seen)
+        self.assertIn("review", seen)
+        # 基线 + 复测各有一次 assessment
+        self.assertEqual(seen.count("assessment"), 2)
+
     def test_dynamic_adjustment_reorders_remaining_week(self) -> None:
         """复测后制图师应重排剩余关卡，指向新暴露的薄弱维度。"""
         db, _, final = _build()
