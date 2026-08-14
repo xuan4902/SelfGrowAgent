@@ -61,14 +61,18 @@ def run_graph(
     thread_id: str,
     answerer: Answerer,
     on_interrupt: Callable[[dict[str, Any]], None] | None = None,
+    on_message: Callable[[list[dict[str, str]]], None] | None = None,
 ) -> dict[str, Any]:
     """把图跑到完成（处理所有 interrupt），返回最终 state。
 
-    on_interrupt 可选：每次暂停时回调当前负载（用于 CLI 自动演示的实时讲解）。
+    on_interrupt 可选：每次暂停时回调当前负载（CLI 讲解/界面展示用）。
+    on_message 可选：每轮推进后回调「新增的 messages」（含计划/讲解/对线/
+    战报等不在中断负载里的叙述，voice 模式用来朗读）。只传增量，不重复。
     """
     config = {"configurable": {"thread_id": thread_id}}
     first = True
     payload: dict[str, Any] | None = None
+    seen_msgs = 0
 
     while True:
         if first:
@@ -80,6 +84,11 @@ def run_graph(
             pass  # 推进到暂停点或结束
 
         snap = graph.get_state(config)
+        if on_message is not None:
+            msgs = snap.values.get("messages", [])
+            if len(msgs) > seen_msgs:
+                on_message(msgs[seen_msgs:])
+                seen_msgs = len(msgs)
         if not snap.next:
             break
         # 取第一个中断负载（多中断并发场景取首个）

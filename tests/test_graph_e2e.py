@@ -138,6 +138,27 @@ class TestGraphE2E(unittest.TestCase):
         # 断点续学语义：thread_id 复用时同一会话上下文延续
         self.assertEqual(final["goal"], "提升汇报能力")
 
+    def test_on_message_hook_streams_new_narration(self) -> None:
+        """voice 模式的朗读钩子：每轮只收「新增」消息，不重复不遗漏。"""
+        collected: list[dict[str, str]] = []
+        batches: list[int] = []
+
+        def hook(delta: list[dict[str, str]]) -> None:
+            collected.extend(delta)
+            batches.append(len(delta))
+
+        db = Database(path=":memory:")
+        rt = default_runtime(db=db)
+        graph = build_graph(runtime=rt)
+        init = new_initial_state("msg_01", "提升汇报能力")
+        final = run_graph(
+            graph, init, thread_id="msg_01",
+            answerer=ScriptedAnswerer(), on_message=hook,
+        )
+        self.assertEqual(collected, final["messages"], "钩子应累计到全部消息")
+        self.assertGreater(len(batches), 1, "应分批推送而非一次性全量")
+        self.assertTrue(all(b > 0 for b in batches), "每批都不为空")
+
     def test_on_interrupt_hook_fires_per_pause(self) -> None:
         """CLI auto 模式的讲解钩子：每次暂停都应收到中断负载。"""
         seen: list[str] = []
