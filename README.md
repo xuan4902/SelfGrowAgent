@@ -125,15 +125,15 @@ tests/             unittest 全覆盖 + 图端到端 + 自适应测评循环 + W
 
 ```
 P7  本期提交：AI 逐题自适应测评 + 动态场景引擎 + VN 视觉小说前端 + 汇报文档同步
-83196d1  P6: Web 图形界面（FastAPI + SSE 会话桥接 + 原生前端雷达战报）
-0da082f  docs: 汇报演示文档（三幕脚本 + 官方7能力对照 + 实跑证据）
-caa50ea  feat: 图执行 on_message 增量叙述钩子（voice/交互朗读复用）
-6fd449e  docs: P5 文档三件套 + README 完善 + selfgrow 命令入口
-017183d  P4: CLI 演示层（交互 + auto 自动演示 + 通关战报）
-039bbcc  P3: LangGraph 五角色多 Agent 编排（诊断/规划/学习/演练/复盘/毕业）
-7460645  P2: LLM 双模(Claude/Mock) + RAG 知识库 + 存储层(向量+SQLite)
-776d375  P1: 数据层——向上管理能力框架/测评题库/情景副本/知识语料
-84e1ee0  P0: 项目脚手架
+  P6: Web 图形界面（FastAPI + SSE 会话桥接 + 原生前端雷达战报）
+  docs: 汇报演示文档（三幕脚本 + 官方7能力对照 + 实跑证据）
+  feat: 图执行 on_message 增量叙述钩子（voice/交互朗读复用）
+  docs: P5 文档三件套 + README 完善 + selfgrow 命令入口
+  P4: CLI 演示层（交互 + auto 自动演示 + 通关战报）
+  P3: LangGraph 五角色多 Agent 编排（诊断/规划/学习/演练/复盘/毕业）
+  P2: LLM 双模(Claude/Mock) + RAG 知识库 + 存储层(向量+SQLite)
+  P1: 数据层——向上管理能力框架/测评题库/情景副本/知识语料
+  P0: 项目脚手架
 ```
 
 ## 文档索引
