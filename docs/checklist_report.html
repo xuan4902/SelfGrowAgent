@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>附录 C · Demo 验证清单核对报告 —— SelfGrowAgent</title>
+<style>
+  :root{
+    --ink:#1c2733; --ink-soft:#4a5a6a; --muted:#7d8b99;
+    --accent:#2f5d8f; --accent-deep:#1d3c5c; --accent-soft:#eaf1f8;
+    --line:#dde5ec; --line-soft:#eef3f7;
+    --pass:#1f7a4d; --pass-soft:#e8f6ee;
+    --warn:#b26a00; --warn-soft:#fff5e6;
+    --card-bg:#ffffff; --bg:#f4f7fa;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{-webkit-print-color-adjust:exact; print-color-adjust:exact;}
+  body{
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,-apple-system,sans-serif;
+    color:var(--ink); background:var(--bg); line-height:1.7; font-size:15px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .sheet{max-width:920px; margin:32px auto; background:var(--card-bg);
+    border:1px solid var(--line); border-radius:14px; overflow:hidden;
+    box-shadow:0 10px 40px rgba(29,60,92,.08);}
+  .sheet-inner{padding:0 56px 40px;}
+
+  /* ---------- 封面区 ---------- */
+  .cover{position:relative; padding:40px 56px 30px; color:#fff;
+    background:linear-gradient(135deg,var(--accent-deep) 0%,var(--accent) 60%,#4b7fb0 100%);}
+  .cover::after{content:""; position:absolute; inset:0;
+    background-image:
+      radial-gradient(circle at 85% 20%, rgba(255,255,255,.16) 0 90px, transparent 90px),
+      radial-gradient(circle at 12% 110%, rgba(255,255,255,.10) 0 140px, transparent 140px);}
+  .cover .kicker{font-size:13px; letter-spacing:.35em; opacity:.85; margin-bottom:14px;}
+  .cover h1{font-size:30px; font-weight:700; letter-spacing:.02em; line-height:1.3;}
+  .cover .sub{font-size:15px; opacity:.92; margin-top:10px;}
+  .cover .meta{display:flex; flex-wrap:wrap; gap:10px 28px; margin-top:22px; font-size:13.5px; opacity:.95;}
+  .cover .meta span b{font-weight:600; margin-right:6px; opacity:.75;}
+
+  /* ---------- 结论速览 ---------- */
+  .section-title{display:flex; align-items:center; gap:12px; margin:36px 0 18px;}
+  .section-title .bar{width:5px; height:22px; border-radius:3px; background:var(--accent);}
+  .section-title h2{font-size:20px; font-weight:700; letter-spacing:.04em;}
+  .section-title .tag{margin-left:auto; font-size:12.5px; color:var(--muted); letter-spacing:.08em;}
+
+  .verdict-strip{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
+  .vc{display:flex; align-items:center; gap:10px; padding:14px 16px; border-radius:10px;
+    border:1px solid var(--line-soft); background:var(--bg);}
+  .vc .dot{width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+    font-size:17px; flex:none;}
+  .vc .dot.pass{background:var(--pass-soft); color:var(--pass);}
+  .vc .dot.warn{background:var(--warn-soft); color:var(--warn);}
+  .vc .t{font-size:13.5px; font-weight:600;}
+  .vc .s{font-size:12px; color:var(--muted);}
+
+  .verdict-box{display:flex; align-items:center; gap:14px; margin-top:16px; padding:16px 20px;
+    border-radius:10px; border:1px solid var(--pass-soft); background:linear-gradient(90deg,var(--pass-soft),#f3fbf7);}
+  .verdict-box .big{font-size:22px;}
+  .verdict-box .txt b{color:var(--pass);}
+  .verdict-box .txt .note{font-size:13px; color:var(--muted); display:block; margin-top:2px;}
+
+  /* ---------- 检查项卡片 ---------- */
+  .check-item{border:1px solid var(--line); border-radius:12px; margin-top:18px; overflow:hidden;}
+  .item-head{display:flex; align-items:center; gap:16px; padding:16px 22px;
+    background:linear-gradient(180deg,#fbfcfe,var(--accent-soft)); border-bottom:1px solid var(--line-soft);}
+  .item-num{width:40px; height:40px; border-radius:10px; flex:none; display:flex; align-items:center; justify-content:center;
+    font-size:20px; font-weight:700; color:#fff; background:linear-gradient(135deg,var(--accent),var(--accent-deep));}
+  .item-head h3{font-size:17px; font-weight:700; letter-spacing:.02em;}
+  .req{font-size:12.5px; color:var(--ink-soft); margin-top:3px;}
+  .badge{margin-left:auto; flex:none; padding:6px 14px; border-radius:999px; font-size:13px; font-weight:700; letter-spacing:.06em;}
+  .badge.pass{background:var(--pass-soft); color:var(--pass); border:1px solid #bfe3cd;}
+  .badge.warn{background:var(--warn-soft); color:var(--warn); border:1px solid #f0d6a8;}
+
+  .item-body{padding:18px 22px 20px;}
+  .lead{font-size:14px; color:var(--ink); margin-bottom:14px;}
+  .lead b{color:var(--accent-deep);}
+  table{width:100%; border-collapse:collapse; font-size:13.8px;}
+  th{background:var(--accent-deep); color:#fff; text-align:left; padding:9px 14px; font-weight:600;
+    font-size:13px; letter-spacing:.05em;}
+  th:first-child{border-top-left-radius:8px;} th:last-child{border-top-right-radius:8px;}
+  td{padding:10px 14px; vertical-align:top; border-bottom:1px solid var(--line-soft);}
+  td:first-child{width:96px; white-space:nowrap; font-weight:600; color:var(--accent-deep);}
+  tr:nth-child(even) td{background:#f8fbfd;}
+  tr:last-child td{border-bottom:none;}
+  ul{margin:0; padding-left:18px;}
+  li{margin:3px 0;}
+  code{font-family:Consolas,"Courier New",monospace; background:#eef2f6; color:#a3410f;
+    padding:1px 6px; border-radius:5px; font-size:12.5px;}
+
+  .evidence{margin-top:14px; padding:10px 14px; border-radius:8px; background:var(--bg);
+    border-left:4px solid var(--accent); font-size:13px; color:var(--ink-soft);}
+  .evidence b{color:var(--accent-deep); margin-right:4px;}
+  .evidence a{color:var(--accent); text-decoration:none; font-weight:600;}
+  .evidence a:hover{text-decoration:underline;}
+
+  /* ---------- 待办 ---------- */
+  .todo{padding:20px 22px;}
+  .todo-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
+  .todo-card{border:1px dashed #e3cfa0; border-radius:10px; padding:14px 16px; background:#fffdf6;}
+  .todo-card .no{font-size:12px; color:var(--warn); font-weight:700; letter-spacing:.1em; margin-bottom:6px;}
+  .todo-card .t{font-size:14px; font-weight:600;}
+  .todo-card .d{font-size:12.5px; color:var(--muted); margin-top:4px;}
+  .todo-card code{background:#f3ead6; color:#8a5a00;}
+
+  /* ---------- 页脚 ---------- */
+  .foot{margin-top:26px; padding:16px 22px; border-top:1px solid var(--line);
+    font-size:12.5px; color:var(--muted); display:flex; align-items:center; gap:8px;}
+  .foot .divider{flex:1; border-top:1px dashed var(--line);}
+
+  /* ---------- 打印 ---------- */
+  .print-btn{position:fixed; right:26px; bottom:26px; z-index:99; border:none; cursor:pointer;
+    padding:13px 22px; border-radius:999px; font-size:14px; font-weight:700; color:#fff;
+    background:linear-gradient(135deg,var(--accent),var(--accent-deep));
+    box-shadow:0 6px 20px rgba(29,60,92,.35); transition:transform .15s;}
+  .print-btn:hover{transform:translateY(-2px);}
+
+  @media print{
+    body{background:#fff;}
+    .sheet{margin:0; border:none; box-shadow:none; border-radius:0; max-width:none;}
+    .sheet-inner{padding:0 6mm 0;}
+    .cover{border-radius:0; -webkit-print-color-adjust:exact; padding:14mm 10mm 10mm;}
+    .check-item{page-break-inside:avoid;}
+    .print-btn{display:none;}
+    .verdict-box,.check-item,.todo-card{page-break-inside:avoid;}
+    @page{margin:14mm 12mm;}
+  }
+  @media (max-width:720px){
+    .sheet{margin:0; border:none; border-radius:0;}
+    .sheet-inner{padding:0 20px 24px;}
+    .cover{padding:28px 20px 24px;}
+    .verdict-strip,.todo-grid{grid-template-columns:1fr;}
+    .item-head{flex-wrap:wrap;}
+    .badge{margin-left:0;}
+  }
+</style>
+</head>
+<body>
+
+<button class="print-btn" onclick="window.print()">🖨 打印 / 存为 PDF</button>
+
+<div class="sheet">
+  <!-- ============ 封面区 ============ -->
+  <div class="cover">
+    <div class="kicker">WORLD AI OPEN SOURCE COMPETITION · GOAI</div>
+    <h1>SelfGrowAgent · 个性化自驱学习 Agent</h1>
+    <div class="sub">「把『我想学 X』转化为可诊断、有计划、有练习、有反馈、能坚持的能力成长闭环」</div>
+    <div class="meta">
+      <span><b>赛道</b>AI + 教育 · 个性化学习规划 Agent / 职业教育 Agent</span>
+      <span><b>首个能力域</b>向上管理（6 子能力 × 5 级行为锚定）</span>
+      <span><b>技术栈</b>LangGraph 多 Agent 编排 · Claude 双模 · RAG · VN 前端</span>
+      <span><b>核对日期</b>2026-08-15</span>
+    </div>
+  </div>
+
+  <div class="sheet-inner">
+    <!-- ============ 结论速览 ============ -->
+    <div class="section-title">
+      <div class="bar"></div><h2>结论速览</h2>
+      <div class="tag">附录 C · Demo 验证清单 · 6 项核对</div>
+    </div>
+
+    <div class="verdict-strip">
+      <div class="vc"><div class="dot pass">✅</div><div><div class="t">可从零开始运行 Demo</div><div class="s">环境 / 依赖 / 配置 / 启动 / 自检</div></div></div>
+      <div class="vc"><div class="dot pass">✅</div><div><div class="t">完整任务链路</div><div class="s">输入 → 处理 → 工具 → 交付 → 验证</div></div></div>
+      <div class="vc"><div class="dot pass">✅</div><div><div class="t">样例数据与权限</div><div class="s">来源 / 授权 / 脱敏 / 适用边界</div></div></div>
+      <div class="vc"><div class="dot pass">✅</div><div><div class="t">失败与异常分支</div><div class="s">调用失败 / 信息不足 / 高风险判断</div></div></div>
+      <div class="vc"><div class="dot pass">✅</div><div><div class="t">输出结果可追溯</div><div class="s">依据来源 / 日志 / 截图 / 评测证据</div></div></div>
+      <div class="vc"><div class="dot warn">⚠️</div><div><div class="t">路演材料与 Demo 一致</div><div class="s">仓库与文档已同步 · 视频待录</div></div></div>
+    </div>
+
+    <div class="verdict-box">
+      <div class="big">🎯</div>
+      <div class="txt">
+        <b>6 项检查项 —— 5 项完成 ✅ · 1 项部分完成 ⚠️</b>
+        <span class="note">仓库、说明文档与实跑证据已全部对齐当前 Demo；第 ⑥ 项仅演示视频与现场展示待办（PPT 由参赛路演材料另行制作），不涉及任何代码 / 功能缺口。</span>
+      </div>
+    </div>
+
+    <!-- ============ ① 可从零开始运行 ============ -->
+    <div class="check-item">
+      <div class="item-head">
+        <div class="item-num">①</div>
+        <div>
+          <h3>可从零开始运行 Demo</h3>
+          <div class="req">检查要求 · 提供环境、依赖、配置和启动方式</div>
+        </div>
+        <div class="badge pass">✅ 完成</div>
+      </div>
+      <div class="item-body">
+        <div class="lead"><b>一条命令装好、一条命令跑通、全程离线可用</b>——评委无需准备 API Key、无需联网即可完整演示。</div>
+        <table>
+          <tr><td>环境</td><td>Python 3.10+；跨平台（Windows / Linux / macOS 均可运行）</td></tr>
+          <tr><td>依赖</td><td><ul><li><code>pip install -e ".[engine]"</code> —— LangGraph + anthropic SDK（引擎层）</li><li><code>pip install -e ".[web]"</code> —— 追加 FastAPI（图形界面）</li></ul></td></tr>
+          <tr><td>配置</td><td>双模 LLM 自动切换：有 <code>ANTHROPIC_API_KEY</code> 用真 Claude；无 Key 自动降级<strong>确定性 Mock</strong>——测试 / 演示 / 答辩零依赖、离线可跑</td></tr>
+          <tr><td>启动方式</td><td><ul><li>CLI 自动演示：<code>python -m selfgrow.cli.main --mode auto</code></li><li>CLI 真人交互：<code>python -m selfgrow.cli.main --mode interactive</code></li><li>Web 视觉小说界面：<code>python -m selfgrow.web.app</code> → http://127.0.0.1:8000</li></ul></td></tr>
+          <tr><td>自检</td><td><code>python -m unittest discover -s tests</code> → <strong>95 个用例全绿（约 4s）</strong>，环境就绪即达标</td></tr>
+        </table>
+        <div class="evidence"><b>依据</b><a href="../README.md#四快速开始">README.md §四「快速开始」</a>（含 CLI 参数表：--mode / --goal / --learner / --db）</div>
+      </div>
+    </div>
+
+    <!-- ============ ② 完整任务链路 ============ -->
+    <div class="check-item">
+      <div class="item-head">
+        <div class="item-num">②</div>
+        <div>
+          <h3>至少有一个完整任务链路</h3>
+          <div class="req">检查要求 · 展示输入、处理、工具调用、结果交付和验证</div>
+        </div>
+        <div class="badge pass">✅ 完成</div>
+      </div>
+      <div class="item-body">
+        <div class="lead"><b>从一句模糊诉求到一份量化成长战报</b>，五角色 Agent 协作跑通「诊断 → 规划 → 学习 → 对线 → 复盘 → 复测 → 毕业」全闭环。</div>
+        <table>
+          <tr><td>输入</td><td>学员原始诉求：「我想提升向上管理，尤其想学会怎么跟老板汇报」</td></tr>
+          <tr><td>处理</td><td>LangGraph 五角色节点编排，<code>interrupt()</code> / <code>Command(resume=)</code> 多轮交互：AI 逐题自适应测评（10 题基线 + 3 题复测）→ 动态场景副本对线 → 复盘 → 复测动态重排</td></tr>
+          <tr><td>工具调用</td><td>5 类工具全程留痕（评审证据）：<code>generate_question×13</code> 逐题出题 · <code>generate_scenario×2</code> 动态场景 · <code>search_knowledge×2</code> RAG 检索 · <code>save_record×11</code> 数据落库 · <code>build_mindmap×1</code> 思维导图</td></tr>
+          <tr><td>结果交付</td><td>通关战报 + 能力成长雷达 + 闯关路线回顾（XP 100 / 等级 L3 / 工具调用 29 次）</td></tr>
+          <tr><td>验证</td><td>基线 vs 复测雷达量化对比 →「✅ 已提升 3 项 / 🔸 仍待修炼 1 项」；端到端用例全绿，结果可复现</td></tr>
+        </table>
+        <div class="evidence"><b>依据</b><a href="artifacts/demo_auto_run.txt">docs/artifacts/demo_auto_run.txt</a>（212 行完整实跑日志）· <a href="../tests/test_graph_e2e.py">tests/test_graph_e2e.py</a>（端到端闭环断言）</div>
+      </div>
+    </div>
+
+    <!-- ============ ③ 样例数据与权限 ============ -->
+    <div class="check-item">
+      <div class="item-head">
+        <div class="item-num">③</div>
+        <div>
+          <h3>样例数据与权限说明清楚</h3>
+          <div class="req">检查要求 · 说明数据来源、授权、脱敏和适用边界</div>
+        </div>
+        <div class="badge pass">✅ 完成</div>
+      </div>
+      <div class="item-body">
+        <div class="lead"><b>全部自建模拟数据，零真实信息</b>——能力框架、测评题库、情景副本、知识语料均基于公开方法论原创编写，无任何真实学生 / 教师 / 机构数据。</div>
+        <table>
+          <tr><td>数据来源</td><td>全部自建：基于金字塔原理、STAR、SBI、预期管理等<strong>公开方法论</strong>原创编写 6 维能力框架、情景测评题库、BOSS 副本与 10 篇知识语料</td></tr>
+          <tr><td>授权</td><td>不采集身份信息；<code>learner_id</code> 由用户自拟；自动演示模式不产生任何真实行为数据</td></tr>
+          <tr><td>脱敏</td><td>提供真实数据接入时的<strong>去标识化 / 脱敏 / 匿名化技术清单</strong>与合规评审清单（须通过评审方可启用）</td></tr>
+          <tr><td>适用边界</td><td>当前版本不接入真实数据；输出为<strong>辅助学习建议</strong>，不替代正式测评、学校 / 机构评价与专业咨询</td></tr>
+        </table>
+        <div class="evidence"><b>依据</b><a href="data_compliance.md">docs/data_compliance.md</a>（数据合规四要素）· <a href="boundary_risks.md">docs/boundary_risks.md</a>（使用边界）</div>
+      </div>
+    </div>
+
+    <!-- ============ ④ 失败与异常分支 ============ -->
+    <div class="check-item">
+      <div class="item-head">
+        <div class="item-num">④</div>
+        <div>
+          <h3>失败与异常分支可解释</h3>
+          <div class="req">检查要求 · 说明调用失败、信息不足、高风险判断时的处理方式</div>
+        </div>
+        <div class="badge pass">✅ 完成</div>
+      </div>
+      <div class="item-body">
+        <div class="lead"><b>每个异常都有明确兜底，学习循环永不卡死</b>——双模行为一致，是演示稳定性的根基。</div>
+        <table>
+          <tr><td>调用失败</td><td>LLM 返回非法 JSON → <code>try/except</code> 回退<strong>确定性题库 / 场景库</strong>（<a href="../src/selfgrow/agents/tools.py#L78-L84">tools.py:78-84</a>、<a href="../src/selfgrow/agents/tools.py#L144-L150">:144-150</a>）；真模型与 Mock 行为一致，循环永不卡死</td></tr>
+          <tr><td>信息不足</td><td>讲师人设「答不上来就明说」；教学原则「<strong>给提示不给答案</strong>」——附错因分析、同类训练</td></tr>
+          <tr><td>高风险判断</td><td><strong>人工确认机制</strong>：测评作答 / 学习动作 / 对线回应 / 复盘反思均由学习者亲自决策；关键结论须人工确认</td></tr>
+          <tr><td>网络依赖</td><td>真模型调用失败自动落回确定性 Mock，演示与测试不中断、不受网络波动影响</td></tr>
+        </table>
+        <div class="evidence"><b>依据</b><a href="boundary_risks.md">docs/boundary_risks.md</a> §3 人工确认机制 · §4 风险与缓解；<a href="../src/selfgrow/agents/tools.py">src/selfgrow/agents/tools.py</a> 失败回退实现</div>
+      </div>
+    </div>
+
+    <!-- ============ ⑤ 输出结果可追溯 ============ -->
+    <div class="check-item">
+      <div class="item-head">
+        <div class="item-num">⑤</div>
+        <div>
+          <h3>输出结果可追溯</h3>
+          <div class="req">检查要求 · 提供依据来源、日志、截图或评测证据</div>
+        </div>
+        <div class="badge pass">✅ 完成</div>
+      </div>
+      <div class="item-body">
+        <div class="lead"><b>每一次结论都能溯源到依据</b>——从知识检索命中、工具调用留痕，到实跑日志、界面截图与量化对比，四类证据齐全。</div>
+        <table>
+          <tr><td>依据来源</td><td>RAG 知识检索留痕（<code>knowledge_hits</code>）、测评标准答案与解析、能力框架 5 级行为锚定</td></tr>
+          <tr><td>日志</td><td><code>state["tools_called"]</code> 工具调用留痕（评审证据）；<a href="artifacts/demo_auto_run.txt">demo_auto_run.txt</a> 212 行完整实跑日志可复现</td></tr>
+          <tr><td>截图</td><td>Web VN 界面截图三张：<a href="artifacts/web_vn_assessment.png">测评单题场景</a> · <a href="artifacts/web_vn_hud.png">HUD 旅程点 / XP / 等级</a> · <a href="artifacts/web_vn_boss.png">BOSS 副本压力条</a></td></tr>
+          <tr><td>评测证据</td><td><strong>95 个 unittest 全绿</strong>；基线 vs 复测雷达<strong>量化对比</strong>（已提升 / 仍待修炼）；思维导图产物（<code>data/artifacts/*.mmd</code>）</td></tr>
+        </table>
+        <div class="evidence"><b>依据</b>仓库 <code>docs/artifacts/</code> 目录（日志 + 截图）；<code>tests/</code> 目录（95 用例）；通关战报「工具调用留痕」区块</div>
+      </div>
+    </div>
+
+    <!-- ============ ⑥ 路演材料与 Demo 一致 ============ -->
+    <div class="check-item">
+      <div class="item-head">
+        <div class="item-num">⑥</div>
+        <div>
+          <h3>路演材料与 Demo 一致</h3>
+          <div class="req">检查要求 · PPT、视频、仓库、说明文档和现场展示互相对应</div>
+        </div>
+        <div class="badge warn">⚠️ 部分完成</div>
+      </div>
+      <div class="item-body">
+        <div class="lead"><b>仓库、说明文档与实跑证据已全部对齐当前 Demo</b>；仅「演示视频」「现场展示」两项为参赛前待办。</div>
+        <table>
+          <tr><td>✅ 仓库</td><td>README / <a href="demo_report.md">汇报演示文档</a> / <a href="architecture.md">架构说明</a> 均对齐当前版本：AI 逐题自适应测评 + 动态场景引擎 + VN 视觉小说前端 + 95 用例</td></tr>
+          <tr><td>✅ 文档</td><td>三幕演示脚本、官方 7 项 Agent 能力对照、三种演示形态、数据合规边界——与实跑输出逐条对应</td></tr>
+          <tr><td>✅ 证据</td><td>212 行实跑日志 + 3 张 VN 界面截图已入库（<code>docs/artifacts/</code>），一键命令可复现</td></tr>
+          <tr><td>⚠️ 视频</td><td>待录制 —— <code>--mode auto</code> 确定性输出，适合直接录屏（推荐）</td></tr>
+          <tr><td>⚠️ 现场展示</td><td>以 Web VN 界面（http://127.0.0.1:8000）为准，浏览器点选即可完整体验</td></tr>
+          <tr><td>⚠️ PPT</td><td>不在仓库内，由参赛路演材料另行制作，内容与本文档、Demo、证据一一对应</td></tr>
+        </table>
+        <div class="evidence"><b>依据</b><a href="demo_report.md">docs/demo_report.md</a> · <a href="artifacts/demo_auto_run.txt">docs/artifacts/demo_auto_run.txt</a> · <a href="artifacts/web_vn_assessment.png">docs/artifacts/web_vn_*.png</a></div>
+      </div>
+    </div>
+
+    <!-- ============ 待办清单 ============ -->
+    <div class="section-title">
+      <div class="bar"></div><h2>结论与待办</h2>
+      <div class="tag">第 ⑥ 项收尾即 6/6 达成</div>
+    </div>
+
+    <div class="check-item">
+      <div class="item-body todo">
+        <div class="lead"><b>已满足（✅）</b>：可从零开始运行 / 完整任务链路 / 样例数据与权限 / 失败异常分支 / 输出结果可追溯。</div>
+        <div class="lead" style="margin-bottom:16px;"><b>待完善（⚠️）</b>：第 ⑥ 项「路演材料与 Demo 一致」——仓库、文档与证据已同步，尚缺以下三项收尾：</div>
+        <div class="todo-grid">
+          <div class="todo-card">
+            <div class="no">TO-DO 01</div>
+            <div class="t">📹 录制演示视频</div>
+            <div class="d">命令 <code>--mode auto</code>，全程离线 Mock 可跑，确定性输出适合录屏</div>
+          </div>
+          <div class="todo-card">
+            <div class="no">TO-DO 02</div>
+            <div class="t">🎮 现场演示 Web 界面</div>
+            <div class="d">启动 <code>python -m selfgrow.web.app</code>，浏览器完整体验 VN 闯关</div>
+          </div>
+          <div class="todo-card">
+            <div class="no">TO-DO 03</div>
+            <div class="t">📊 制作参赛路演 PPT</div>
+            <div class="d">与本文档、Demo、实跑证据一一对应</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="foot">
+      <span>📌 本报告为参赛验收核对说明，全部证据来自仓库内自建模拟数据与实测日志，无真实数据。</span>
+      <div class="divider"></div>
+      <span>SelfGrowAgent · 2026-08-15</span>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>

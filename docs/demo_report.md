@@ -160,7 +160,7 @@ AI 逐题自适应出题（答错加深难度追问）、动态场景引擎（BO
 | **真人交互**（你实时扮演学习者） | `--mode interactive` | 答辩现场，评委提问你来作答 |
 | **Web 视觉小说**（浏览器点选/输入） | `python -m selfgrow.web.app` | 现场展示游戏化体验 + 截图证据 |
 
-> 语音对话入口（`--mode voice`）为后续增强：语音输入（whisper 离线）+ 语音朗读（edge-tts/SAPI）。
+> 语音对话入口（`--mode voice`）已随仓库一并提交：语音输入（whisper 离线）+ 语音朗读（edge-tts/SAPI）。
 > 稳定性仍在打磨，**正式演示以 auto/interactive/Web 为准**。
 
 ---

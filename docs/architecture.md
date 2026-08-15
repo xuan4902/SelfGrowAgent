@@ -9,7 +9,7 @@
 ┌────────────────────────────────────────────────────────────────┐
 │            演示层（三入口，同一套 run_graph 中断/恢复驱动）       │
 │  ① CLI 交互/auto   python -m selfgrow.cli.main --mode …        │
-│  ② CLI 语音        --mode voice（whisper + TTS，暂停打磨中）    │
+│  ② CLI 语音        --mode voice（whisper 离线 ASR + TTS 朗读）     │
 │  ③ Web 图形界面     python -m selfgrow.web.app → 127.0.0.1:8000 │
 │       FastAPI + SSE 会话线程 + 队列桥接（详见 §4）              │
 └───────────────────────────────┬────────────────────────────────┘
@@ -118,8 +118,9 @@ python -m unittest discover -s tests -v
 - `test_graph_e2e`：全链路闭环 + 断点续学 + 动态调整 + on_interrupt 钩子
 - `test_web_session` / `test_web_app`：Web 会话层（interrupt 计数/取消/校验/并发）+ HTTP 端到端（SSE 推流）
 
-> 注：voice 语音入口（`tests/test_cli_voice.py` 等 40 例）为未提交的增强分支，稳定性仍在打磨，
-> 不入测试计数。详见 [demo_report.md](demo_report.md)。
+> 注：voice 语音入口（`tests/test_cli_voice.py` 等 40 例）已随仓库一并提交，
+> 为命令行可选的语音分支（whisper 离线 ASR + TTS 朗读），稳定性仍在打磨，正式演示以
+> auto / interactive / Web 为准。95 个用例计数已包含 voice 的 40 例。
 
 ## 9. Web 图形界面（FastAPI + SSE）
 
