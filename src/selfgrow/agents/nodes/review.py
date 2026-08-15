@@ -12,7 +12,7 @@ from langgraph.types import interrupt
 
 from selfgrow.agents.roles import get_role
 from selfgrow.agents.runtime import Runtime
-from selfgrow.agents.state import AgentState
+from selfgrow.agents.state import AgentState, build_hud
 from selfgrow.agents.tools import call_tool, save_record
 from selfgrow.llm.base import with_ctx, with_task
 
@@ -35,6 +35,7 @@ def review_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
     )
 
     # 2) 中断：收集复盘反思（恢复值 = 用户复盘文本）
+    hud = build_hud(state, "review", week=week, stage_label=f"史官复盘 · W{week}")
     reflection = interrupt(
         {
             "review": {
@@ -42,6 +43,7 @@ def review_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
                 "dimension_name": dim_name,
                 "guide": guide,
                 "banner": role.banner(),
+                "hud": hud,
             }
         }
     )
@@ -63,6 +65,19 @@ def review_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
     need_reassess = new_week >= checkpoint and not state.get("reassess_done")
     stage = "reassess" if need_reassess else "weekly"
 
+    # 进入复测前清空逐题测评的累计状态（基线作答不得污染复测雷达）
+    assessment_reset: dict[str, Any] = {}
+    if need_reassess:
+        assessment_reset = {
+            "assessment_answers": [],
+            "assessment_questions": [],
+            "assessment_plan": [],
+            "assessment_probes": [],
+            "assessment_done": False,
+            "pending_question": None,
+            "pending_narration": None,
+        }
+
     message = (
         f"{role.banner()} 第 {week} 关复盘已归档，成长 +{_WEEK_XP} XP。\n{guide}"
     )
@@ -73,4 +88,5 @@ def review_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
         "stage": stage,
         "tools_called": state.get("tools_called", []) + called,
         "messages": state.get("messages", []) + [{"role": role.id, "content": message}],
+        **assessment_reset,
     }

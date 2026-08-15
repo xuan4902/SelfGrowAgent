@@ -48,10 +48,17 @@ def plan_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
     # ---- 首次生成 ----
     plan = generate_plan(framework, state["radar"], state.get("gaps"), total_weeks=_TOTAL_WEEKS)
     first_dim = framework.get_dimension(plan["weeks"][0]["dimension"])
+    week1 = plan["weeks"][0]
     narration = rt.llm.complete(
         role.system_prompt,
         with_ctx(
-            {"weeks": _TOTAL_WEEKS, "first_dimension_name": first_dim.name if first_dim else ""},
+            {
+                "weeks": _TOTAL_WEEKS,
+                "first_dimension_name": first_dim.name if first_dim else "",
+                "milestone": week1.get("milestone", ""),
+                "actions": [a["criterion"] for a in week1.get("actions", [])],
+                "scenario_link": week1.get("scenario_link", ""),
+            },
             with_task("plan_narrate", "请绘制我的闯关路线"),
         ),
     )

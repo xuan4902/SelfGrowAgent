@@ -1,13 +1,14 @@
-"""LangGraph 编排：五节点 + 条件边 + InMemorySaver 断点续学。
+"""LangGraph 编排：六节点 + 条件边 + InMemorySaver 断点续学。
 
 拓扑：
-START → diagnose → plan ─(stage==reassess)→ graduate → END
-                      └─(else)→ learn ─(继续问)→ learn
-                                      ├─(去演练)→ spar ─(未完)→ spar
-                                      │             └─(打完)→ review
-                                      └─(复盘)→ review ─(week<total)→ learn
-                                                       ├─(week==total,未复测)→ diagnose(reassess)
-                                                       └─(复测完成)→ graduate
+START → diagnose ─(assessment_done)→ plan ─(stage==reassess)→ graduate → END
+        │                               └─(else)→ learn ─(继续问)→ learn
+        └→(未完成)→ diagnose_wait ─→ diagnose（逐题循环）
+                                                   ├─(去演练)→ spar ─(未完)→ spar
+                                                   │             └─(打完)→ review
+                                                   └─(复盘)→ review ─(week<total)→ learn
+                                                                    ├─(week==total,未复测)→ diagnose(reassess)
+                                                                    └─(复测完成)→ graduate
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from langgraph.graph import END, START, StateGraph
 
 from selfgrow.agents.nodes import (
     diagnose_node,
+    diagnose_wait_node,
     graduate_node,
     learn_node,
     plan_node,
@@ -28,6 +30,16 @@ from selfgrow.agents.nodes import (
 )
 from selfgrow.agents.runtime import Runtime, default_runtime
 from selfgrow.agents.state import AgentState
+
+
+def router_after_diagnose(state: dict[str, Any]) -> str:
+    # 测评完成 → 进规划；否则去逐题中断点
+    return "plan" if state.get("assessment_done") else "diagnose_wait"
+
+
+def router_after_diagnose_wait(state: dict[str, Any]) -> str:
+    # 逐题作答已收集（pending_question 已清空）→ 回 diagnose 出下一题；防御性兜底走 plan
+    return "diagnose" if state.get("pending_question") is None else "plan"
 
 
 def router_after_plan(state: dict[str, Any]) -> str:
@@ -73,6 +85,7 @@ def build_graph(runtime: Runtime | None = None) -> Any:
 
     g = StateGraph(AgentState)
     g.add_node("diagnose", bind(diagnose_node))
+    g.add_node("diagnose_wait", bind(diagnose_wait_node))
     g.add_node("plan", bind(plan_node))
     g.add_node("learn", bind(learn_node))
     g.add_node("spar", bind(spar_node))
@@ -80,7 +93,16 @@ def build_graph(runtime: Runtime | None = None) -> Any:
     g.add_node("graduate", bind(graduate_node))
 
     g.add_edge(START, "diagnose")
-    g.add_edge("diagnose", "plan")
+    g.add_conditional_edges(
+        "diagnose",
+        router_after_diagnose,
+        {"plan": "plan", "diagnose_wait": "diagnose_wait"},
+    )
+    g.add_conditional_edges(
+        "diagnose_wait",
+        router_after_diagnose_wait,
+        {"diagnose": "diagnose", "plan": "plan"},
+    )
     g.add_conditional_edges(
         "plan", router_after_plan, {"learn": "learn", "graduate": "graduate"}
     )

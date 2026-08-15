@@ -18,7 +18,13 @@ class AgentState(TypedDict, total=False):
 
     # ---- 诊断 ----
     goal_breakdown: dict[str, Any]         # 拆解：sub_goals / domain_name
-    assessment_questions: list[dict[str, Any]]
+    assessment_questions: list[dict[str, Any]]   # 已出题目
+    assessment_answers: list[dict[str, Any]]     # 已评分作答 [{question_id, dimension, option, correct, difficulty}]
+    assessment_plan: list[dict[str, Any]]        # 待出题计划 [{dimension, min_difficulty, kind}]
+    assessment_done: bool                        # 本轮测评完成（router 判据）
+    assessment_probes: list[str]                 # 已插追问的维度（自适应预算控制）
+    pending_question: dict[str, Any] | None      # 待中断展示的当前题（落盘供 diagnose_wait 读取）
+    pending_narration: str | None                # 当前题配套旁白
     radar: dict[str, int]                  # 当前能力雷达 {dim: 1-5}
     radar_before: dict[str, int] | None    # 基线雷达（成长对比）
     gaps: list[str]                        # 薄弱维度（升序）
@@ -62,6 +68,13 @@ def new_initial_state(learner_id: str, goal: str) -> dict[str, Any]:
         "messages": [],
         "current_week": 0,
         "learn_turns": 0,
+        "assessment_questions": [],
+        "assessment_answers": [],
+        "assessment_plan": [],
+        "assessment_probes": [],
+        "assessment_done": False,
+        "pending_question": None,
+        "pending_narration": None,
         "radar_before": None,
         "stage": "baseline",
         "reassess_done": False,
@@ -72,3 +85,29 @@ def new_initial_state(learner_id: str, goal: str) -> dict[str, Any]:
         "tools_called": [],
         "llm_mode": "mock",
     }
+
+
+def build_hud(
+    state: dict[str, Any],
+    stage: str,
+    week: int | None = None,
+    index: int | None = None,
+    total: int | None = None,
+    stage_label: str | None = None,
+) -> dict[str, Any]:
+    """构造前端 HUD（旅程点/周/进度/XP/等级），随每个 interrupt 下发。"""
+    plan = state.get("plan") or {}
+    hud: dict[str, Any] = {
+        "stage": stage,
+        "week": week if week is not None else state.get("current_week", 0),
+        "total_weeks": plan.get("total_weeks", 0),
+        "xp": state.get("xp", 0),
+        "level": state.get("level", 1),
+    }
+    if index is not None:
+        hud["index"] = index
+    if total is not None:
+        hud["total"] = total
+    if stage_label is not None:
+        hud["stage_label"] = stage_label
+    return hud

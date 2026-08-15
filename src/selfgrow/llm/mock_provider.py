@@ -46,11 +46,52 @@ class MockLLM:
             f"先做一次情景占卜（3 分钟测评），本座就能看出你的天赋属性与短板所在。"
         )
 
+    def task_assess_question(self, ctx: dict, system: str) -> str:
+        """自适应出题：按作答语境从题库确定性拼装（尊重 used_ids / 难度预算）。"""
+        from selfgrow.agents.bank import pick_question
+
+        domain = ctx.get("domain", "managing_up")
+        dim = ctx.get("dimension")
+        min_diff = int(ctx.get("min_difficulty", 1))
+        used = list(ctx.get("used_ids") or [])
+        stage = ctx.get("stage", "baseline")
+        q = pick_question(domain, dim, min_diff, used)
+        if q is None:
+            q = {
+                "id": f"gen_{dim or 'any'}_{len(used) + 1}",
+                "dimension": dim or "goal_alignment",
+                "difficulty": min_diff,
+                "scenario": "面对一个棘手的职场任务，你更倾向于怎么处理？",
+                "options": ["直接照办", "先澄清目标与约束再行动", "自行权衡处理", "暂缓处理"],
+                "correct": 1,
+                "rationale": "先澄清目标与约束，是对齐的第一步。",
+            }
+        return json.dumps(q, ensure_ascii=False)
+
+    def task_spar_scene(self, ctx: dict, system: str) -> str:
+        """按维度取场景副本并补齐环境/压力/利害字段。"""
+        from selfgrow.agents.bank import pick_scenario
+
+        domain = ctx.get("domain", "managing_up")
+        dim = ctx.get("dimension")
+        s = pick_scenario(domain, dim)
+        s.setdefault("environment", "")
+        s.setdefault("stakes", "")
+        s.setdefault("pressure", {"level": 3, "desc": ""})
+        return json.dumps(s, ensure_ascii=False)
+
     def task_plan_narrate(self, ctx: dict, system: str) -> str:
         weeks = ctx.get("weeks", 8)
         first = ctx.get("first_dimension_name", "目标对齐")
+        milestone = ctx.get("milestone", "达成标准见路线图")
+        actions = ctx.get("actions", [])
+        scenario_link = ctx.get("scenario_link", "")
+        action_str = "；".join(str(a) for a in actions[:3]) if actions else "先学原则，再进副本实战"
         return (
             f"路线图已绘制完成！前方共 {weeks} 座关卡，第一关从你最薄弱的「{first}」开始。\n"
+            f"第一关里程碑：{milestone}\n"
+            f"行动清单：{action_str}\n"
+            f"关联副本：{scenario_link or '等你通关后解锁'}。\n"
             f"每一关都是：拜师学艺（学方法）→ 副本对战（练实战）→ 史官复盘（沉淀技能）。\n"
             f"难度会随你的表现动态调整，绝不搞一刀切。"
         )

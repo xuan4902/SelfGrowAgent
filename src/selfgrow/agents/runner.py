@@ -33,16 +33,14 @@ class ScriptedAnswerer:
 
     @staticmethod
     def _assessment(inner: dict[str, Any]) -> dict[str, Any]:
-        # 复测：经过两周学习已掌握 → 全部答对；基线：指定维度答对，其余答错
+        # 逐题作答：复测全对；基线强维度答对、其余答错（造出清晰薄弱点）
         is_reassess = "复测" in (inner.get("stage_label") or "")
-        answers = []
-        for q in inner.get("questions", []):
-            if is_reassess or q["dimension"] in ScriptedAnswerer.STRONG_DIMS:
-                opt = q["correct"]
-            else:
-                opt = (q["correct"] + 1) % len(q["options"])
-            answers.append({"question_id": q["id"], "option": opt})
-        return {"answers": answers}
+        q = inner["question"]
+        if is_reassess or q["dimension"] in ScriptedAnswerer.STRONG_DIMS:
+            opt = q["correct"]
+        else:
+            opt = (q["correct"] + 1) % len(q["options"])
+        return {"question_id": q["id"], "option": opt}
 
 
 class InteractorAnswerer:

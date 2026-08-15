@@ -106,7 +106,7 @@ llm_mode / tools_called                 # 运行元信息 + 工具调用日志(�
 
 ## 8. 测试策略
 
-44 个 committed unittest，全部 mock 模式确定性运行（零 API Key）：
+95 个 unittest，全部 mock 模式确定性运行（零 API Key）：
 
 ```
 python -m unittest discover -s tests -v
@@ -149,8 +149,8 @@ LangGraph 五节点图（与 CLI 完全同一份）
 | `report` | `final`（完整最终 state） | 通关战报 + 雷达前后对比 |
 | `error` / `done` | `message` / `status` | 异常 / 收尾（status=done\|error\|cancelled） |
 
-中断负载顶层单 key：`assessment`（恢复 `{"answers":[{question_id, option(0基)}]}`，
-须覆盖全部题）、`learn`（恢复 ∈ 继续问/去演练/复盘）、`spar`/`review`（自由文本）。
+中断负载顶层单 key：`assessment`（恢复单题 `{"question_id, option(0基)}`，逐题一问一答）、
+`learn`（恢复 ∈ 继续问/去演练/复盘）、`spar`/`review`（自由文本）。
 连接时后端先重放 `history`，前端按事件 `id` 去重 → 断线重连/刷新零丢失。
 
 ### 三个关键坑（实现时的硬约束）

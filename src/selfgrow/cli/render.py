@@ -30,9 +30,15 @@ def role_banner(role_id: str) -> str:
 
 def render_assessment(inner: dict[str, Any]) -> None:
     print(SEP)
-    print(f"🔮 测评 · {inner.get('stage_label', '基线测评')}（共 {len(inner.get('questions', []))} 题）")
-    for i, q in enumerate(inner.get("questions", []), start=1):
-        print(f"  {i}. {q['scenario']}")
+    idx = inner.get("index", 0) + 1
+    total = inner.get("total", 1)
+    print(f"🔮 测评 · {inner.get('stage_label', '基线测评')} 第 {idx}/{total} 题")
+    narration = inner.get("narration", "")
+    if narration:
+        print(f"  {narration}")
+    q = inner.get("question", {})
+    if q:
+        print(f"  {q.get('scenario', '')}")
         for oi, opt in enumerate(q.get("options", []), start=1):
             print(f"     ({oi}) {opt}")
 
@@ -46,9 +52,19 @@ def render_learn(inner: dict[str, Any]) -> None:
 
 def render_spar(inner: dict[str, Any]) -> None:
     print(SEP)
-    print(f"⚔️ 副本《{inner.get('scenario_title', '')}》 回合 {inner.get('user_turns', 0) + 1}/{inner.get('max_turns', 2)}")
-    if inner.get("scenario_goal"):
-        print(f"  目标：{inner['scenario_goal']}")
+    print(f"⚔️ 副本《{inner.get('scene_title', '')}》 回合 {inner.get('user_turns', 0) + 1}/{inner.get('max_turns', 2)}")
+    if inner.get("scene_goal"):
+        print(f"  目标：{inner['scene_goal']}")
+    boss = inner.get("boss", {}) or {}
+    if boss.get("role"):
+        print(f"  BOSS：{boss.get('role', '')}（{boss.get('style', '')}）· {boss.get('persona', '')}")
+    if inner.get("environment"):
+        print(f"  环境：{inner['environment']}")
+    pressure = inner.get("pressure") or {}
+    if pressure.get("desc"):
+        print(f"  压力：{'█' * inner.get('pressure_now', 0)}{'░' * (5 - inner.get('pressure_now', 0))} {pressure['desc']}")
+    if inner.get("stakes"):
+        print(f"  利害：{inner['stakes']}")
     print(f"  NPC：{inner.get('npc_line', '')}")
 
 
@@ -85,16 +101,15 @@ def _ask_option(prompt: str, options: list[str], default: str = "") -> str:
 
 def collect_assessment(inner: dict[str, Any], framework: CompetencyFramework | None) -> dict[str, Any]:
     render_assessment(inner)
-    answers: list[dict[str, Any]] = []
-    for i, q in enumerate(inner.get("questions", []), start=1):
-        n = len(q.get("options", []))
-        while True:
-            raw = input(f"  第 {i} 题（1-{n}）：").strip()
-            if raw.isdigit() and 1 <= int(raw) <= n:
-                break
-            print("  请输入有效选项序号")
-        answers.append({"question_id": q["id"], "option": int(raw) - 1})
-    return {"answers": answers}
+    q = inner.get("question", {})
+    n = len(q.get("options", []))
+    while True:
+        raw = input(f"  你的选择（回车=第 1 项，1-{n}）：").strip()
+        if not raw:
+            return {"question_id": q["id"], "option": 0}  # 空回车默认选第 1 项（防死循环/自动模式）
+        if raw.isdigit() and 1 <= int(raw) <= n:
+            return {"question_id": q["id"], "option": int(raw) - 1}
+        print("  请输入有效选项序号")
 
 
 def collect_learn(inner: dict[str, Any]) -> str:

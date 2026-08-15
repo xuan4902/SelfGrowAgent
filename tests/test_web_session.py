@@ -34,10 +34,10 @@ def make_manager(**kw) -> SessionManager:
 class TestWebSession(unittest.TestCase):
     @staticmethod
     def _answer_body(payload: dict) -> dict:
-        """把 ScriptedAnswerer 的恢复值映射成 HTTP body（assessment 用 answers，其余用 value）。"""
+        """把 ScriptedAnswerer 的恢复值映射成 HTTP body（assessment 已是单题 {question_id, option}，其余用 value）。"""
         value = ScriptedAnswerer().answer(payload)
         if "assessment" in payload:
-            return {"answers": value["answers"]}
+            return value
         return {"value": value}
 
     def _wait_waiting(self, s, timeout: float = 15.0):
@@ -81,7 +81,8 @@ class TestWebSession(unittest.TestCase):
             if ev["type"] == "interrupt":
                 key = next(iter(ev["payload"]))
                 counts[key] = counts.get(key, 0) + 1
-        self.assertEqual(counts.get("assessment"), 2)
+        # 单题测评：基线 10 + 复测 3 = 13；learn/spar/review 每周各一次（spar 跨周累积 3 回合）
+        self.assertEqual(counts.get("assessment"), 13)
         self.assertEqual(counts.get("learn"), 2)
         self.assertEqual(counts.get("spar"), 3)
         self.assertEqual(counts.get("review"), 2)
@@ -125,7 +126,7 @@ class TestWebSession(unittest.TestCase):
         self.assertIn("assessment", payload)
 
         with self.assertRaises(AnswerValidationError):
-            s.submit_answer({"answers": []})  # 空答案 → 400 语义
+            s.submit_answer({"question_id": "x", "option": 0})  # question_id 不匹配 → 400 语义
         self.assertEqual(s.status, "waiting")
         self.assertEqual(s.current_payload, payload)
 

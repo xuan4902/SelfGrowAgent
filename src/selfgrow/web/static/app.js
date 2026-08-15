@@ -1,11 +1,13 @@
-/* SelfGrowAgent Web 前端：fetch+ReadableStream 手写 SSE + 状态机 + 各负载渲染 + 雷达。
+/* SelfGrowAgent Web 前端：文字冒险 / 视觉小说（VN）界面。
  *
  * 设计要点：
  * - 不用 EventSource：避免断线自动重连导致历史重放与 live 事件错位；连接时后端
  *   先重放 history，前端按事件 id 去重，刷新恢复零丢失。
- * - 状态机 phase: idle|running|waiting|done|error|submitting；提交期全面板禁用，
+ * - 状态机 phase: idle|running|waiting|done|error；提交期 locked 全面板禁用，
  *   409 视为「服务器已接收」忽略。
- * - 测评答案从 payload 的 questions 实时构建（不回显 correct 字段）。
+ * - 每个 interrupt 携带 hud（旅程点/周/XP/等级），前端据此刷新 HUD。
+ * - 测评逐题一问一答：叙事打字机 → 对话匣 → ▼ 选项，作答 {question_id, option}。
+ * - 对线副本：BOSS 名牌 + 压力条 + 利害 + 自由输入。
  */
 "use strict";
 
@@ -17,8 +19,9 @@ const state = {
   payload: null,          // 当前 interrupt 负载
   final: null,            // 战报 final state
   submitting: false,
-  answers: new Map(),     // question_id -> option(0基)
+  answers: new Map(),     // question_id -> option(0基)（兼容保留）
   seen: new Set(),        // 已处理事件 id（去重）
+  hud: null,              // 最近一次 HUD（journey/xp/level）
   framework: null,        // /api/meta
 };
 
@@ -30,11 +33,25 @@ const el = {
   start: $("btn-start"),
   reset: $("btn-reset"),
   sid: $("sid-badge"),
-  llm: $("llm-badge"),
   status: $("status-line"),
-  transcript: $("transcript"),
-  panel: $("panel"),
   toast: $("toast"),
+  sceneBg: $("scene-bg"),
+  sceneTitle: $("scene-title"),
+  hudBoss: $("hud-boss"),
+  bossLine: $("boss-line"),
+  pressureBar: $("pressure-bar"),
+  narration: $("narration"),
+  nameplate: $("nameplate"),
+  dialogueBox: $("dialogue-box"),
+  dialogueText: $("dialogue-text"),
+  choices: $("choices"),
+  inputArea: $("input-area"),
+  journal: $("journal"),
+  journeyDots: $("journey-dots"),
+  xpFill: $("xp-fill"),
+  xpLabel: $("xp-label"),
+  levelBadge: $("level-badge"),
+  stageInner: $("stage").querySelector(".stage-inner"),
 };
 
 const ROLE_NAMES = {
@@ -80,6 +97,11 @@ async function api(path, opts) {
   return body;
 }
 
+function dimName(id) {
+  if (state.framework && state.framework.dimensionMap) return state.framework.dimensionMap[id] || id;
+  return id;
+}
+
 // ================= SSE 客户端（手写解析） =================
 function parseFrame(text) {
   let id = null, event = "message", dataLines = [];
@@ -115,7 +137,8 @@ async function connectSSE(sid, handlers) {
       const frame = buf.slice(0, idx);
       buf = buf.slice(idx + 2);
       const ev = parseFrame(frame);
-      if (ev && handlers[ev.event]) handlers[ev.event](ev);
+      // 注意：parseFrame 返回的是帧 {id,event,data}，data 才是会话事件 dict（含 type）
+      if (ev && handlers[ev.event]) handlers[ev.event](ev.data);
     }
   }
 }
@@ -152,141 +175,259 @@ function appendDeltas(delta) {
   for (const m of delta) {
     const name = ROLE_NAMES[m.role] || m.role;
     const div = document.createElement("div");
-    div.className = "msg";
-    div.innerHTML = `<span class="role">${escapeHtml(name)}</span>${escapeHtml(m.content || "")}`;
-    el.transcript.appendChild(div);
+    div.innerHTML = `<span class="j-role">${escapeHtml(name)}</span> ${escapeHtml(m.content || "")}`;
+    el.journal.appendChild(div);
   }
-  el.transcript.scrollTop = el.transcript.scrollHeight;
+  el.journal.scrollTop = el.journal.scrollHeight;
 }
 
 function addSysLine(text) {
   const div = document.createElement("div");
-  div.className = "msg sys";
+  div.className = "j-sys";
   div.textContent = text;
-  el.transcript.appendChild(div);
-  el.transcript.scrollTop = el.transcript.scrollHeight;
+  el.journal.appendChild(div);
+  el.journal.scrollTop = el.journal.scrollHeight;
 }
 
-// ================= 面板渲染 =================
+// ================= 场景 / 打字机 =================
+function mapMood(s) {
+  if (!s) return "mystic";
+  if (/副本|对线|战斗|boss/i.test(s)) return "boss";
+  if (/复盘|史官|肃穆/i.test(s)) return "review";
+  if (/报告|结算/i.test(s)) return "report";
+  if (/讲|学|练|研/i.test(s)) return "study";
+  return "mystic";
+}
+
+function setScene({ mood, title }) {
+  el.sceneBg.className = "mood-" + mapMood(mood);
+  el.sceneTitle.textContent = title || "—";
+}
+
+function clearStage() {
+  const settle = $("settle");
+  if (settle) settle.remove();
+  el.hudBoss.hidden = true;
+  el.nameplate.hidden = true;
+  el.dialogueBox.hidden = true;
+  el.choices.innerHTML = "";
+  el.inputArea.hidden = true;
+  el.inputArea.innerHTML = "";
+  el.narration.textContent = "";
+}
+
+function typeText(el2, text, done) {
+  if (!text) { if (done) done(); return; }
+  el2.textContent = "";
+  let i = 0, timer = null, finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    el2.textContent = text;
+    if (done) done();
+  };
+  const step = () => {
+    if (i < text.length) { el2.textContent += text[i++]; timer = setTimeout(step, 13); }
+    else finish();
+  };
+  el2.addEventListener("click", finish, { once: true });  // 点击跳过打字
+  timer = setTimeout(step, 80);
+}
+
+function showChoices(items) {
+  el.choices.innerHTML = "";
+  items.forEach((it, i) => {
+    const b = document.createElement("button");
+    b.className = "choice-btn";
+    b.textContent = it.label;
+    b.style.animationDelay = (0.08 + i * 0.07).toFixed(2) + "s";
+    b.addEventListener("click", it.onClick);
+    el.choices.appendChild(b);
+  });
+}
+
+function showInput({ label, placeholder, submitText, skipText, allowEmpty, onSubmit, onSkip }) {
+  el.inputArea.innerHTML = `
+    <label>${escapeHtml(label || "")}</label>
+    <textarea id="free-input" placeholder="${escapeHtml(placeholder || "")}"></textarea>
+    <div class="submit-row">
+      <button id="btn-send" class="primary">${escapeHtml(submitText || "提交")}</button>
+      ${skipText ? `<button id="btn-skip" class="danger">${escapeHtml(skipText)}</button>` : ""}
+    </div>`;
+  el.inputArea.hidden = false;
+  $("btn-send").addEventListener("click", () => {
+    const v = $("free-input").value.trim();
+    if (!v && !allowEmpty) { toast("先写下你的回应再出手", true); return; }
+    onSubmit(v);
+  });
+  if (skipText) $("btn-skip").addEventListener("click", () => onSkip && onSkip());
+}
+
+function showThinking() {
+  clearStage();
+  el.narration.textContent = "⏳ 系统正在推进剧情…";
+}
+
+// ================= HUD：旅程点 / XP / 等级 =================
+function updateHud(hud) {
+  if (!hud) return;
+  state.hud = hud;
+  renderXp(hud.xp || 0);
+  renderJourney(hud);
+}
+
+function renderXp(xp) {
+  const level = 1 + Math.floor((xp || 0) / 50);
+  const into = (xp || 0) % 50;
+  el.xpFill.style.width = Math.min(100, (into / 50) * 100) + "%";
+  el.xpLabel.textContent = `${xp || 0} XP`;
+  el.levelBadge.textContent = `L${level}`;
+}
+
+function renderJourney(hud) {
+  const total = hud.total_weeks || 0;
+  const dots = [{ label: "诊断" }];
+  if (total > 0) dots.push({ label: "规划" });
+  for (let i = 1; i <= total; i++) dots.push({ label: `W${i}` });
+  if (total > 0) dots.push({ label: "毕业" });
+  // 规划尚未揭晓（基线测评中）：旅程条先用幽灵占位「诊断 → 规划 → … → 毕业」
+  if (total <= 0) dots.push({ label: "规划", ghost: true },
+                            { label: "…", ghost: true },
+                            { label: "毕业", ghost: true });
+
+  let cur = -1;
+  const stage = hud.stage;
+  if (state.final) cur = dots.length - 1;         // 已毕业 → 全点亮
+  else if (stage === "diagnose") cur = 0;
+  else if (stage === "plan") cur = 1;
+  else if (stage === "learn" || stage === "spar" || stage === "review")
+    cur = Math.min(1 + (hud.week || 1), dots.length - 1);
+
+  el.journeyDots.innerHTML = dots.map((d, i) =>
+    `<span class="${d.ghost ? "dot ghost" : i < cur ? "dot done" : i === cur ? "dot cur" : "dot"}"><em>${escapeHtml(d.label)}</em></span>`
+  ).join("");
+}
+
+// ================= 面板渲染（VN） =================
 function renderPanel() {
   const p = state.payload;
   if (!p) return;
-  if ("assessment" in p) renderAssessment(p.assessment);
-  else if ("learn" in p) renderLearn(p.learn);
-  else if ("spar" in p) renderSpar(p.spar);
-  else if ("review" in p) renderReview(p.review);
-  else el.panel.innerHTML = `<div class="card"><h2>未知交互</h2><pre>${escapeHtml(JSON.stringify(p, null, 2))}</pre></div>`;
+  if ("assessment" in p) { updateHud(p.assessment.hud); renderAssessment(p.assessment); }
+  else if ("learn" in p) { updateHud(p.learn.hud); renderLearn(p.learn); }
+  else if ("spar" in p) { updateHud(p.spar.hud); renderSpar(p.spar); }
+  else if ("review" in p) { updateHud(p.review.hud); renderReview(p.review); }
+  else {
+    setScene({ mood: "mystic", title: "未知事件" });
+    clearStage();
+    el.dialogueBox.hidden = false;
+    el.dialogueText.textContent = JSON.stringify(p, null, 2);
+  }
 }
 
-function panelHeader(banner, title) {
-  return `<div class="card hero"><h2>${escapeHtml(banner || "")} ${escapeHtml(title || "")}</h2></div>`;
-}
-
-// ---- 测评 ----
+// ---- 测评（逐题一问一答） ----
 function renderAssessment(a) {
-  const qs = a.questions || [];
-  const rows = qs.map((q, i) => {
-    const opts = (q.options || []).map((opt, oi) => {
-      const checked = state.answers.get(q.id) === oi ? " checked" : "";
-      return `
-        <label class="option${checked}">
-          <input type="radio" name="q${q.id}" value="${oi}"
-            data-qid="${escapeHtml(q.id)}" data-opt="${oi}">
-          <span class="opt-text">${escapeHtml(opt)}</span>
-        </label>`;
-    }).join("");
-    return `
-      <div class="question">
-        <div class="scenario"><span class="qidx">Q${i + 1}</span>${escapeHtml(q.scenario || "")}</div>
-        ${opts}
-      </div>`;
-  }).join("");
-  el.panel.innerHTML = `
-    ${panelHeader(a.banner, `${a.stage_label || "测评"}（共 ${qs.length} 题）`)}
-    <div class="card">
-      <div class="narration">${escapeHtml(a.narration || "")}</div>
-      <div class="assessment-note">逐题选择你的真实做法（真实作答才能生成准确的雷达）。</div>
-      ${rows}
-      <div class="submit-row">
-        <button id="btn-answer" class="primary big" style="flex:1">提交测评</button>
-      </div>
-    </div>`;
-  // 绑定单选
-  for (const input of el.panel.querySelectorAll("input[type=radio]")) {
-    input.addEventListener("change", () => {
-      state.answers.set(input.dataset.qid, Number(input.dataset.opt));
-      // 高亮选中项
-      input.closest(".question").querySelectorAll(".option").forEach((o) =>
-        o.classList.toggle("selected", o === input.closest(".option")));
+  const q = a.question || {};
+  const idx = (a.index || 0) + 1;
+  const total = a.total || 1;
+  const dim = dimName(q.dimension);
+  setScene({
+    mood: (a.scene || {}).mood,
+    title: `${a.stage_label || "测评"} · ${dim} · 第 ${idx}/${total} 题`,
+  });
+  clearStage();
+  el.nameplate.textContent = ROLE_NAMES[a.role] || a.banner || "占卜师";
+  el.nameplate.hidden = false;
+  el.dialogueBox.hidden = false;
+  setPhase("waiting", `等待作答 · 第 ${idx}/${total} 题`);
+  typeText(el.narration, a.narration || "", () => {
+    typeText(el.dialogueText, q.scenario || "", () => {
+      showChoices((q.options || []).map((opt, oi) => ({
+        label: opt,
+        onClick: () => submit({ question_id: q.id, option: oi }),
+      })));
     });
-  }
-  $("btn-answer").addEventListener("click", () => {
-    if (qs.some((q) => !state.answers.has(q.id))) {
-      toast("还有题目未作答，请全部选择后再提交", true);
-      return;
-    }
-    const body = { answers: qs.map((q) => ({ question_id: q.id, option: state.answers.get(q.id) })) };
-    submit(body);
   });
 }
 
-// ---- 学习动作 ----
+// ---- 拜师学艺 ----
 function renderLearn(l) {
-  el.panel.innerHTML = `
-    ${panelHeader(l.banner, `第 ${l.week} 关 · ${l.dimension_name}`)}
-    <div class="card">
-      <h3>📖 讲师讲解</h3>
-      <div class="lesson-box">${escapeHtml(l.lesson || "")}</div>
-      <div class="action-row">
-        ${(l.options || []).map((opt, i) =>
-          `<button class="act-opt" data-i="${i}">${escapeHtml(opt)}</button>`).join("")}
-      </div>
-    </div>`;
-  for (const b of el.panel.querySelectorAll(".act-opt")) {
-    b.addEventListener("click", () => submit({ value: l.options[Number(b.dataset.i)] }));
-  }
-}
-
-// ---- 对线 ----
-function renderSpar(s) {
-  el.panel.innerHTML = `
-    ${panelHeader(s.banner, `副本《${s.scenario_title}》 回合 ${(s.user_turns || 0) + 1}/${s.max_turns || 2}`)}
-    <div class="card">
-      <h3>🎯 目标</h3>
-      <div class="lesson-box">${escapeHtml(s.scenario_goal || "")}</div>
-      <h3 style="margin-top:12px">👤 NPC</h3>
-      <div class="npc-bubble">${escapeHtml(s.npc_line || "")}</div>
-      <label class="form-hint" for="spar-input">你的回应（怎么澄清、怎么要资源、怎么定方案）</label>
-      <textarea id="spar-input" placeholder="把你想对老板说的话写下来…"></textarea>
-      <div class="submit-row">
-        <button id="btn-answer" class="primary" style="flex:1">出手 💪</button>
-        <button id="btn-cancel" class="danger">放弃本轮</button>
-      </div>
-    </div>`;
-  $("btn-answer").addEventListener("click", () => {
-    const v = $("spar-input").value.trim();
-    if (!v) { toast("先写下你的回应再出手", true); return; }
-    submit({ value: v });
+  setScene({ mood: "study", title: `拜师学艺 · W${l.week} · ${l.dimension_name}` });
+  clearStage();
+  el.nameplate.textContent = "📖 讲师";
+  el.nameplate.hidden = false;
+  el.dialogueBox.hidden = false;
+  setPhase("waiting", `等待选择 · W${l.week}`);
+  const quest = [l.milestone, l.challenge].filter(Boolean).join("\n");
+  typeText(el.narration, quest ? "◈ 本周任务\n" + quest : "", () => {
+    typeText(el.dialogueText, l.lesson || "", () => {
+      showChoices((l.options || []).map((opt) => ({
+        label: opt,
+        onClick: () => submit({ value: opt }),
+      })));
+    });
   });
-  $("btn-cancel").addEventListener("click", () => submit({ value: "（未回应）" }));
 }
 
-// ---- 复盘 ----
+// ---- 副本对线（BOSS HUD） ----
+function renderSpar(s) {
+  const turn = (s.user_turns || 0) + 1;
+  const maxTurns = s.max_turns || 2;
+  setScene({ mood: "boss", title: `副本《${s.scene_title || ""}》 · 回合 ${turn}/${maxTurns}` });
+  clearStage();
+  const boss = s.boss || {};
+  el.hudBoss.hidden = false;
+  el.bossLine.innerHTML = `
+    <span class="boss-name">☠ ${escapeHtml(boss.name || "上级")}</span>
+    <span class="boss-role">${escapeHtml(boss.role || "")}</span>
+    <span class="boss-style">${escapeHtml(boss.style || "")}</span>
+    <span class="boss-persona">${escapeHtml(boss.persona || "")}</span>
+    <span class="turns">回合 ${turn}/${maxTurns}</span>`;
+  const now = Math.max(0, Math.min(5, s.pressure_now || 0));
+  let segs = "";
+  for (let i = 0; i < 5; i++) segs += `<span class="seg${i < now ? " on" : ""}"></span>`;
+  el.pressureBar.innerHTML = segs + `<span class="plabel">压力 ${now}/5</span>`;
+  setPhase("waiting", `副本对线 · 回合 ${turn}/${maxTurns}`);
+  const env = s.environment ? `场景：${s.environment}` : "";
+  const stakes = s.stakes ? `利害：${s.stakes}` : "";
+  typeText(el.narration, [env, stakes].filter(Boolean).join("\n"), () => {
+    el.nameplate.textContent = boss.name || "上级";
+    el.nameplate.hidden = false;
+    el.dialogueBox.hidden = false;
+    typeText(el.dialogueText, s.npc_line || "", () => {
+      showInput({
+        label: "你的回应（怎么谈、怎么争取、怎么定方案）",
+        placeholder: "把你想对老板说的话写下来…",
+        submitText: "出手 💪",
+        skipText: "放弃本轮",
+        onSubmit: (v) => submit({ value: v || "（未回应）" }),
+        onSkip: () => submit({ value: "（未回应）" }),
+      });
+    });
+  });
+}
+
+// ---- 史官复盘 ----
 function renderReview(r) {
-  el.panel.innerHTML = `
-    ${panelHeader(r.banner, `第 ${r.week} 关复盘 · ${r.dimension_name}`)}
-    <div class="card">
-      <h3>📜 史官引导</h3>
-      <div class="lesson-box">${escapeHtml(r.guide || "")}</div>
-      <label class="form-hint" for="review-input">写下你的复盘反思</label>
-      <textarea id="review-input" placeholder="这一关你经历了什么？注意到什么？提炼出什么原则？下周怎么用？"></textarea>
-      <div class="submit-row">
-        <button id="btn-answer" class="primary" style="flex:1">沉淀复盘 ✍️</button>
-        <button id="btn-cancel" class="danger">跳过</button>
-      </div>
-    </div>`;
-  $("btn-answer").addEventListener("click", () => submit({ value: $("review-input").value.trim() || "（未填写）" }));
-  $("btn-cancel").addEventListener("click", () => submit({ value: "（未填写）" }));
+  setScene({ mood: "review", title: `史官复盘 · W${r.week} · ${r.dimension_name}` });
+  clearStage();
+  el.nameplate.textContent = "📜 史官";
+  el.nameplate.hidden = false;
+  el.dialogueBox.hidden = false;
+  setPhase("waiting", `等待复盘 · W${r.week}`);
+  typeText(el.narration, `第 ${r.week} 关已结束，复盘沉淀 +50 XP。`, () => {
+    typeText(el.dialogueText, r.guide || "", () => {
+      showInput({
+        label: "写下你的复盘反思",
+        placeholder: "这一关你经历了什么？注意到什么？提炼出什么原则？下周怎么用？",
+        submitText: "沉淀复盘 ✍️",
+        skipText: "跳过",
+        allowEmpty: true,
+        onSubmit: (v) => submit({ value: v || "（未填写）" }),
+        onSkip: () => submit({ value: "（未填写）" }),
+      });
+    });
+  });
 }
 
 // ---- 提交（防双提交：409 视为已接收） ----
@@ -294,7 +435,7 @@ async function submit(body) {
   if (state.submitting) return;
   state.submitting = true;
   setPhase("running", "处理中…");
-  disablePanel(true);
+  showThinking();
   try {
     const r = await api(`/api/sessions/${state.sid}/answer`, {
       method: "POST",
@@ -304,43 +445,50 @@ async function submit(body) {
     if (!r._conflict) {
       state.payload = null;
       state.answers.clear();
-      el.panel.innerHTML = `<div class="card"><h2>⏳ 学习中…</h2><div class="lesson-box">系统正在推进流程，请稍候。</div></div>`;
     }
   } catch (e) {
     setPhase("waiting", "等待作答");
     toast("提交失败：" + e.message, true);
-    renderPanel();  // 恢复表单（保留已填内容）
+    renderPanel();  // 恢复当前场景（保留已填内容）
+  } finally {
     state.submitting = false;
-    disablePanel(false);
   }
 }
 
-function disablePanel(on) {
-  for (const b of el.panel.querySelectorAll("button, textarea, input")) b.disabled = on;
-}
-
-// ================= 战报 =================
-function dimName(id) {
-  if (state.framework && state.framework.dimensionMap) return state.framework.dimensionMap[id] || id;
-  return id;
-}
-
+// ================= 通关战报（结算） =================
 function renderReport() {
   const f = state.final;
   if (!f || !f.report) return;
   const r = f.report;
+  updateHud({
+    stage: "graduate",
+    week: f.current_week || 0,
+    total_weeks: (f.plan && f.plan.total_weeks) || 0,
+    xp: r.xp || 0,
+    level: r.level || 1,
+  });
+  setScene({ mood: "report", title: "通关结算" });
+  clearStage();
+
   const improved = (r.improved || []).map((x) => `<span class="chip ok">✅ ${escapeHtml(x)}</span>`).join("");
   const gaps = (r.remaining_gaps || []).map((x) => `<span class="chip warn">🔸 ${escapeHtml(x)}</span>`).join("")
     || `<span class="chip muted">无（本轮全维度达标）</span>`;
   const tools = (r.tools_used || []).map((x) => `<span class="chip muted">${escapeHtml(x)}</span>`).join("");
   const planWeeks = ((f.plan && f.plan.weeks) || []).map((w, i) => {
     const done = (i + 1) <= (f.current_week || 0);
+    const actions = (w.actions || []).map((a) =>
+      `<div class="actions">• ${escapeHtml(a.criterion || a || "")}</div>`).join("");
+    const link = w.scenario_link ? `<div class="link">${escapeHtml(w.scenario_link)}</div>` : "";
     return `
       <div class="week-row">
-        <span class="wk">W${i + 1}</span>
-        <span class="dim">${escapeHtml(dimName(w.dimension))}</span>
-        <span class="goal">${escapeHtml(w.goal || "")}</span>
-        ${done ? '<span class="check">✔</span>' : '<span class="pending">进行中/待定</span>'}
+        <div class="wk-line"><span class="wk">W${i + 1}</span>
+          <span class="dim">${escapeHtml(dimName(w.dimension))}</span>
+          <span class="goal">${escapeHtml(w.goal || "")}</span>
+          ${done ? '<span class="check">✔</span>' : '<span class="pending">待定</span>'}
+        </div>
+        ${w.milestone ? `<div class="milestone">${escapeHtml(w.milestone)}</div>` : ""}
+        ${actions}
+        ${link}
       </div>`;
   }).join("");
 
@@ -351,10 +499,11 @@ function renderReport() {
       ${feedback.suggestions ? `\n建议：${escapeHtml(feedback.suggestions)}` : ""}
     </div>`;
 
-  el.panel.innerHTML = `
+  settle(`
     <div class="card hero">
       <h2>🎓 通关战报</h2>
-      <div class="narration">${escapeHtml(r.summary || "")}</div>
+      <div class="sub">${escapeHtml(r.goal || "")}</div>
+      <div class="lesson-box" style="margin-top:10px">${escapeHtml(r.summary || "")}</div>
     </div>
     <div class="stats">
       <div class="stat done"><div class="num">${r.xp ?? 0}</div><div class="lbl">XP</div></div>
@@ -363,7 +512,7 @@ function renderReport() {
       <div class="stat"><div class="num">${(r.remaining_gaps || []).length}</div><div class="lbl">仍待修炼</div></div>
     </div>
     <div class="card">
-      <h3>📡 能力雷达 · 成长对比（灰 = 入关时，蓝 = 通关后）</h3>
+      <h3>📡 能力雷达 · 成长对比（灰 = 入关时，金 = 通关后）</h3>
       <div class="radar-legend">
         <span><span class="dot before"></span>入关时</span>
         <span><span class="dot after"></span>通关后</span>
@@ -381,32 +530,44 @@ function renderReport() {
     ${feedback.overall_level != null ? `<div class="card"><h3>⚔️ 陪练反馈</h3>${sf}</div>` : ""}
     <div class="card">
       <h3>🔧 工具调用留痕</h3>
-      <div class="chips">${tools}</div>
+      <div class="chips">${tools || '<span class="chip muted">无</span>'}</div>
     </div>
     <div class="boundary">本结果为<b>辅助学习建议</b>，不替代正式测评、学校/机构评价或专业心理咨询；
       全部数据为自建模拟数据，不涉及真实个人信息。</div>
     <div class="submit-row">
       <button id="btn-again" class="primary big" style="flex:1">开启新会话 🔄</button>
-    </div>`;
+    </div>`);
   $("btn-again").addEventListener("click", resetAll);
   drawRadar(r.radar_before || {}, r.radar_after || {}, state.framework.dimensionList || []);
 }
 
 function renderCancelled() {
-  el.panel.innerHTML = `
+  setScene({ mood: "review", title: "会话中止" });
+  clearStage();
+  settle(`
     <div class="card hero"><h2>⏹ 会话已取消</h2>
-      <div class="narration">本次成长练习已中止。可开启新会话重新开始。</div></div>
-    <div class="submit-row"><button id="btn-again" class="primary big" style="flex:1">重新开始</button></div>`;
+      <div class="narration" style="cursor:default">本次成长练习已中止。可开启新会话重新开始。</div></div>
+    <div class="submit-row"><button id="btn-again" class="primary big" style="flex:1">重新开始</button></div>`);
   $("btn-again").addEventListener("click", resetAll);
 }
 
 function renderError(msg) {
-  el.panel.innerHTML = `
+  setScene({ mood: "review", title: "出错了" });
+  clearStage();
+  settle(`
     <div class="card hero" style="border-color:var(--err)">
       <h2>⚠️ 出错了</h2>
-      <div class="narration">${escapeHtml(msg)}</div></div>
-    <div class="submit-row"><button id="btn-again" class="primary big" style="flex:1">重试 / 新会话</button></div>`;
+      <div class="narration" style="cursor:default">${escapeHtml(msg)}</div></div>
+    <div class="submit-row"><button id="btn-again" class="primary big" style="flex:1">重试 / 新会话</button></div>`);
   $("btn-again").addEventListener("click", resetAll);
+}
+
+function settle(html) {
+  const wrap = document.createElement("div");
+  wrap.id = "settle";
+  wrap.className = "settle-wrap";
+  wrap.innerHTML = html;
+  el.stageInner.appendChild(wrap);
 }
 
 // ================= 雷达 canvas =================
@@ -450,7 +611,7 @@ function drawRadar(before, after, dims) {
     // 维度名（中文名，短名截断）
     const label = dims[i].length > 5 ? dims[i].slice(0, 4) : dims[i];
     const [lx, ly] = pt(i, 5.4);
-    ctx.fillStyle = "var(--muted)";
+    ctx.fillStyle = "var(--ink-dim)";
     ctx.font = "12px 'Microsoft YaHei', sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -473,8 +634,8 @@ function drawRadar(before, after, dims) {
 
   const afterVals = dims.map((d) => after[d] || 1);
   const beforeVals = dims.map((d) => before[d] || 1);
-  drawPoly(beforeVals, "rgba(147,160,189,.75)", 0.12);   // 灰色 = 入关时
-  drawPoly(afterVals, "#4f8cff", 0.20);                  // 蓝色 = 通关后
+  drawPoly(beforeVals, "rgba(179,171,146,.8)", 0.12);   // 灰 = 入关时
+  drawPoly(afterVals, "#e0a83c", 0.22);                 // 金 = 通关后
 }
 
 // ================= 会话生命周期 =================
@@ -482,7 +643,7 @@ async function startRun(goal) {
   state.goal = goal;
   setPhase("running", "正在启动…");
   el.overlay.classList.add("hidden");
-  disablePanel(true);
+  showThinking();
   try {
     const r = await api("/api/sessions", {
       method: "POST",
@@ -509,13 +670,18 @@ function resetAll() {
   state.sid = null;
   state.payload = null;
   state.final = null;
+  state.hud = null;
   state.answers.clear();
   state.seen.clear();
-  el.transcript.innerHTML = "";
-  el.panel.innerHTML = "";
+  el.journal.innerHTML = "";
+  clearStage();
   el.sid.textContent = "-";
   el.sid.classList.remove("live");
   el.goal.value = "";
+  el.xpFill.style.width = "0%";
+  el.xpLabel.textContent = "0 XP";
+  el.levelBadge.textContent = "L1";
+  el.journeyDots.innerHTML = "";
   history.replaceState(null, "", location.pathname);
   el.overlay.classList.remove("hidden");
   setPhase("idle", "就绪");
@@ -532,7 +698,7 @@ async function recoverFromUrl() {
     el.sid.textContent = sid;
     el.sid.classList.add("live");
     el.overlay.classList.add("hidden");
-    // 重放历史（转录 + 终态）
+    // 重放历史（过程记录 + 终态）
     for (const ev of snap.history || []) handleEvent(ev);
     if (snap.final) { state.final = snap.final; }
     // 若仍在等待，立即渲染当前负载
@@ -565,10 +731,8 @@ async function init() {
       state.framework.dimensionMap[d.id] = d.name;
       return d.id;
     });
-    el.llm.textContent = "模型：" + (meta.llm_mode === "claude" ? "Claude" : "Mock 离线");
-    el.llm.classList.add("live");
   } catch (e) {
-    el.llm.textContent = "模型：未知";
+    state.framework = { dimensionMap: {}, dimensionList: [] };
   }
   el.start.addEventListener("click", () => {
     const goal = el.goal.value.trim();

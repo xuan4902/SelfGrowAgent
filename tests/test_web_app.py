@@ -32,7 +32,7 @@ def make_app() -> TestClient:
 def answer_body(payload: dict) -> dict:
     value = ScriptedAnswerer().answer(payload)
     if "assessment" in payload:
-        return {"answers": value["answers"]}
+        return value  # 单题 {question_id, option}
     return {"value": value}
 
 
@@ -149,7 +149,7 @@ class TestWebApp(unittest.TestCase):
             time.sleep(0.02)
         self.assertIn("assessment", payload)
 
-        rr = self.client.post(f"/api/sessions/{sid}/answer", json={"answers": []})
+        rr = self.client.post(f"/api/sessions/{sid}/answer", json={"question_id": "x", "option": 0})
         self.assertEqual(rr.status_code, 400)
         # 会话仍在等待、payload 未变
         st = self.client.get(f"/api/sessions/{sid}").json()

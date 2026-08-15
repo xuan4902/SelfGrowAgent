@@ -1,19 +1,23 @@
 """⚔️ 陪练武士・陪练官：沉浸式副本对线（多轮）→ 打完按 rubric 反馈。
 
+动态场景引擎：每关副本由 AI 按维度+难度现场生成完整场景（老板人设/环境/事件/利害压力），
+Mock 走场景库确定性拼装；只有同维度才复用已有场景，避免跨周张冠李戴。
+
 评审点：多轮交互 + 情景模拟 + 结果验证（错因分析/同类推荐）。
 中断点：每回合收集用户回应（恢复值 = 字符串）。
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langgraph.types import interrupt
 
 from selfgrow.agents.roles import get_role
 from selfgrow.agents.runtime import Runtime
-from selfgrow.agents.state import AgentState
-from selfgrow.agents.tools import call_tool, get_scenario, save_record
+from selfgrow.agents.state import AgentState, build_hud
+from selfgrow.agents.tools import call_tool, generate_scenario, save_record
 from selfgrow.competency.rubric import evaluate_response
 from selfgrow.llm.base import with_ctx, with_task
 
@@ -47,6 +51,20 @@ def _user_text(transcript: list[dict[str, str]]) -> str:
     return "\n".join(m["content"] for m in transcript if m.get("role") == "user")
 
 
+def _boss_card(scenario: dict[str, Any]) -> dict[str, Any]:
+    """把 npc 人设展开为前端 BOSS HUD 需要的卡片。"""
+    npc = scenario.get("npc", {}) or {}
+    role = npc.get("role", "上级")
+    m = re.search(r"（(.+?)）", role)
+    difficulty = int(scenario.get("difficulty", 3) or 3)
+    return {
+        "name": m.group(1) if m else role,
+        "role": role,
+        "persona": npc.get("persona", ""),
+        "style": {2: "温和直接", 3: "施压试探", 4: "高压威逼"}.get(difficulty, "直接"),
+    }
+
+
 def spar_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
     called: list[dict[str, Any]] = []
     role = get_role("spar")
@@ -56,12 +74,16 @@ def spar_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
     week = state.get("current_week", 0) + 1
     dim_id = state["plan"]["weeks"][week - 1]["dimension"]
 
-    # 取场景（工具调用；若已有则复用）
-    if state.get("scenario"):
-        scenario = state["scenario"]
-    else:
+    # 动态场景：仅当已有场景与当前维度一致才复用，否则现场生成（工具调用留痕）
+    scenario = state.get("scenario")
+    if not scenario or scenario.get("dimension") != dim_id:
         scenario = call_tool(
-            called, "get_scenario", get_scenario, domain=rt.domain, dimension=dim_id
+            called, "generate_scenario", generate_scenario,
+            llm=rt.llm, role_prompt=role.system_prompt,
+            dimension=dim_id, difficulty_hint=1,
+            domain=rt.domain,
+            goal=state.get("goal", ""),
+            user_profile={"weakest": (state.get("gaps") or [None])[0]},
         )
 
     transcript = list(state.get("spar_transcript", []))
@@ -69,15 +91,25 @@ def spar_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
 
     # 中断：等待用户出手（恢复值 = 用户回应文本）
     npc_line = _npc_line(scenario, user_turns, rt)
+    pressure = scenario.get("pressure") or {}
+    pressure_level = int(pressure.get("level", 3) or 3)
+    boss = _boss_card(scenario)
+    hud = build_hud(state, "spar", week=week, stage_label=f"副本对战 · W{week}")
     move = interrupt(
         {
             "spar": {
-                "scenario_title": scenario.get("title", ""),
-                "scenario_goal": scenario.get("goal", ""),
+                "scene_title": scenario.get("title", ""),
+                "scene_goal": scenario.get("goal", ""),
+                "boss": boss,
+                "environment": scenario.get("environment", ""),
+                "pressure": pressure,
+                "pressure_now": min(5, pressure_level + user_turns),
+                "stakes": scenario.get("stakes", ""),
                 "npc_line": npc_line,
                 "user_turns": user_turns,
                 "max_turns": _MAX_TURNS,
                 "banner": role.banner(),
+                "hud": hud,
             }
         }
     )

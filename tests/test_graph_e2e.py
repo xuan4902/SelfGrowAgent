@@ -45,7 +45,7 @@ class TestGraphE2E(unittest.TestCase):
         self.assertTrue(breakdown["sub_goals"])
         self.assertEqual(breakdown["domain_name"], framework.name)
 
-        # 3) 计划生成：每周含维度/目标/语料/场景
+        # 3) 计划生成：每周含维度/目标/语料/场景 + 里程碑/行动清单/关联副本（内容升级）
         plan = final["plan"]
         self.assertEqual(plan["total_weeks"], 2)
         for w in plan["weeks"]:
@@ -54,6 +54,9 @@ class TestGraphE2E(unittest.TestCase):
             self.assertTrue(w["goal"])
             self.assertTrue(w["scenario_id"])
             self.assertTrue(w["knowledge_query"])
+            self.assertTrue(w["milestone"])       # 达成标准（行为锚定）
+            self.assertTrue(w["actions"])          # 行动清单（rubric 前三）
+            self.assertTrue(w["scenario_link"])    # 关联副本《…》
 
         # 4) 结果验证：基线 vs 最终雷达 → 明确成长
         before = final["radar_before"]
@@ -83,9 +86,9 @@ class TestGraphE2E(unittest.TestCase):
         self.assertIn("radar_after", report)
         self.assertGreater(report["xp"], 0)
 
-        # 7) 工具调用日志：五类关键工具全触发
+        # 7) 工具调用日志：五类关键工具全触发（逐题出题 + 动态场景）
         tool_names = {t["name"] for t in final["tools_called"]}
-        for expect in ("generate_assessment", "search_knowledge", "get_scenario", "save_record", "build_mindmap"):
+        for expect in ("generate_question", "search_knowledge", "generate_scenario", "save_record", "build_mindmap"):
             self.assertIn(expect, tool_names)
 
         # 8) 上下文记忆：五角色消息 + 关系型落库完整
@@ -123,8 +126,8 @@ class TestGraphE2E(unittest.TestCase):
         self.assertEqual(snap.values["goal"], "提升汇报能力")
         self.assertEqual(snap.values["learner_id"], "resume_01")
 
-        # 逐个恢复直到结束（验证多轮恢复链路）
-        for _ in range(20):
+        # 逐个恢复直到结束（验证多轮恢复链路；单题 interrupt 更多，给足上界）
+        for _ in range(80):
             if not snap.next:
                 break
             resume_val = answerer.answer(snap.tasks[0].interrupts[0].value)
@@ -175,8 +178,8 @@ class TestGraphE2E(unittest.TestCase):
         self.assertIn("learn", seen)
         self.assertIn("spar", seen)
         self.assertIn("review", seen)
-        # 基线 + 复测各有一次 assessment
-        self.assertEqual(seen.count("assessment"), 2)
+        # 单题测评：基线 10（6 核心 + 4 追问）+ 复测 3（薄弱维度聚焦）= 13 次
+        self.assertEqual(seen.count("assessment"), 13)
 
     def test_dynamic_adjustment_reorders_remaining_week(self) -> None:
         """复测后制图师应重排剩余关卡，指向新暴露的薄弱维度。"""

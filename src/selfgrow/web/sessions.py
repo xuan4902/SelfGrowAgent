@@ -65,30 +65,27 @@ _LEARN_CHOICES = ("继续问", "去演练", "复盘")
 def validate_answer(payload: dict[str, Any], body: dict[str, Any]) -> Any:
     """按当前中断负载类型校验并归一化恢复值。
 
-    - assessment → {"answers": [{question_id, option(0基)}]}，须覆盖全部题、题集合全等
+    - assessment → {"question_id", "option(0基)"}，question_id 必须等于当前题、option 在选项范围内
     - learn     → 字符串，必须 ∈ {继续问, 去演练, 复盘}
     - spar/review → 字符串（自由文本，可为空字符串）
     """
     if "assessment" in payload:
         inner = payload["assessment"]
-        questions = inner.get("questions", [])
-        qids = {q["id"] for q in questions}
-        answers = body.get("answers")
-        if not isinstance(answers, list) or not answers:
-            raise AnswerValidationError("测评答案不能为空")
-        got = {a["question_id"] for a in answers if isinstance(a, dict)}
-        if got != qids:
+        q = inner.get("question")
+        if not isinstance(q, dict) or not q.get("id"):
+            raise AnswerValidationError("当前测评负载缺少题目")
+        qid = body.get("question_id")
+        if qid != q["id"]:
             raise AnswerValidationError(
-                f"测评答案须覆盖全部 {len(qids)} 题（缺失/多余/未知题目）"
+                f"question_id 不匹配当前题目（期望 {q['id']}）"
             )
-        normalized = []
-        for a in answers:
-            q = next((x for x in questions if x["id"] == a["question_id"]), None)
-            opt = a.get("option")
-            if not isinstance(opt, int) or isinstance(opt, bool) or not (0 <= opt < len(q["options"])):
-                raise AnswerValidationError(f"题目 {a['question_id']} 选项越界（须 0..{len(q['options'])-1}）")
-            normalized.append({"question_id": a["question_id"], "option": opt})
-        return {"answers": normalized}
+        opt = body.get("option")
+        n_opts = len(q.get("options", []))
+        if not isinstance(opt, int) or isinstance(opt, bool) or not (0 <= opt < n_opts):
+            raise AnswerValidationError(
+                f"题目 {qid} 选项越界（须 0..{n_opts - 1} 的整数）"
+            )
+        return {"question_id": qid, "option": opt}
     if "learn" in payload:
         value = body.get("value")
         if value not in _LEARN_CHOICES:

@@ -1,7 +1,8 @@
-"""工具注册表：知识库检索 / 测评生成 / 框架加载 / 场景取用 / 数据落库 / 可视化。
+"""工具注册表：题目/场景生成（LLM+题库兜底）/ 知识库检索 / 框架加载 / 数据落库 / 可视化。
 
 节点通过 call_tool 调用并留痕（tools_called），作为评审证据。
-所有工具为纯函数（含数据读取），确定性、可测试。
+LLM 负责内容生成，代码负责选型与校验：真模型现场出题/出场景，Mock 走题库确定性拼装，
+解析失败回退确定性 bank，保证双模行为一致、循环永不卡死。
 """
 
 from __future__ import annotations
@@ -10,78 +11,147 @@ import json
 from pathlib import Path
 from typing import Any, Callable
 
+from selfgrow.agents.bank import pick_question, pick_scenario
 from selfgrow.competency.loader import load_framework
 from selfgrow.competency.models import CompetencyFramework
 from selfgrow.competency.radar import render_ascii_radar
-from selfgrow.paths import ASSESSMENTS_DIR, SCENARIOS_DIR
+from selfgrow.llm.base import with_ctx, with_task
 from selfgrow.rag.knowledge_base import KnowledgeBase, KnowledgeHit
 
 DEFAULT_DOMAIN = "managing_up"
 
-# 题库/场景库缓存
-_QUESTIONS: dict[str, list[dict[str, Any]]] = {}
-_SCENARIOS: dict[str, list[dict[str, Any]]] = {}
 
-
-def _load_questions(domain: str) -> list[dict[str, Any]]:
-    if domain not in _QUESTIONS:
-        path = ASSESSMENTS_DIR / f"{domain}_questions.json"
-        if not path.exists():
-            raise FileNotFoundError(f"题库不存在: {path}")
-        _QUESTIONS[domain] = json.loads(path.read_text(encoding="utf-8"))["questions"]
-    return _QUESTIONS[domain]
-
-
-def _load_scenarios(domain: str) -> list[dict[str, Any]]:
-    if domain not in _SCENARIOS:
-        path = SCENARIOS_DIR / f"{domain}_scenarios.json"
-        if not path.exists():
-            raise FileNotFoundError(f"场景库不存在: {path}")
-        _SCENARIOS[domain] = json.loads(path.read_text(encoding="utf-8"))["scenarios"]
-    return _SCENARIOS[domain]
-
-
-# ---- 工具函数（纯逻辑） ----
+# ---- 工具函数（纯逻辑 + LLM 内容生成） ----
 
 def load_framework_tool(domain: str = DEFAULT_DOMAIN) -> CompetencyFramework:
     return load_framework(domain)
 
 
-def generate_assessment(
-    domain: str = DEFAULT_DOMAIN,
-    focus_dims: list[str] | None = None,
-    per_dim: int = 2,
+def _sanitize_question(q: Any, dimension: str, min_difficulty: int, used: list[str]) -> dict[str, Any] | None:
+    """校验/归一化 LLM 返回的题目 JSON；不合法返回 None。"""
+    if not isinstance(q, dict) or not q.get("scenario"):
+        return None
+    opts = q.get("options")
+    if not isinstance(opts, list) or len(opts) < 2:
+        return None
+    correct = q.get("correct")
+    if not isinstance(correct, int) or isinstance(correct, bool) or not (0 <= correct < len(opts)):
+        correct = 0
+    q["options"] = [str(o) for o in opts]
+    q["correct"] = correct
+    q.setdefault("dimension", dimension)
+    q.setdefault("difficulty", min_difficulty)
+    q.setdefault("rationale", "")
+    q.setdefault("id", f"gen_{dimension}_{len(used) + 1}")
+    return q
+
+
+def generate_question(
+    llm: Any,
+    role_prompt: str,
+    dimension: str | None = None,
     min_difficulty: int = 1,
-) -> list[dict[str, Any]]:
-    """抽取测评题目。focus_dims 为空 = 全维度基线测评；否则聚焦指定维度（复测用）。"""
-    bank = _load_questions(domain)
-    if not focus_dims:
-        focus_dims = sorted({q["dimension"] for q in bank})
-    picked: list[dict[str, Any]] = []
-    for dim in focus_dims:
-        cand = [q for q in bank if q["dimension"] == dim and q.get("difficulty", 1) >= min_difficulty]
-        # 确定性选取：取前 per_dim 道（题库已按难度递增排列）
-        picked.extend(cand[:per_dim])
-    return picked
+    used_ids: list[str] | None = None,
+    domain: str = DEFAULT_DOMAIN,
+    stage: str = "baseline",
+    goal: str = "",
+    prior_answers: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """生成一道情景测评题（AI 逐题自适应）。Mock 走题库确定性拼装；真模型现场出题。
+
+    返回 {id, dimension, difficulty, scenario, options[], correct, rationale}。
+    """
+    used = list(used_ids or [])
+    ctx = {
+        "domain": domain,
+        "dimension": dimension,
+        "min_difficulty": min_difficulty,
+        "used_ids": used,
+        "stage": stage,
+        "goal": goal,
+        "prior_answers": (prior_answers or [])[:6],
+    }
+    raw = llm.complete(
+        role_prompt,
+        with_ctx(ctx, with_task("assess_question", "生成一道情景测评题（只输出 JSON）")),
+    )
+    try:
+        q = _sanitize_question(json.loads(raw), dimension, min_difficulty, used)
+        if q is not None:
+            return q
+    except (ValueError, TypeError):
+        pass
+    # 兜底：确定性题库选取（Claude 解析失败 / Mock 兜底均走这里）
+    q = pick_question(domain, dimension, min_difficulty, used)
+    if q is None:
+        q = {
+            "id": f"gen_{dimension}_{len(used) + 1}",
+            "dimension": dimension,
+            "difficulty": min_difficulty,
+            "scenario": "面对一个棘手的职场任务，你更倾向于怎么处理？",
+            "options": ["直接照办", "先澄清目标与约束再行动", "自行权衡处理", "暂缓处理"],
+            "correct": 1,
+            "rationale": "先澄清目标与约束，是对齐的第一步。",
+        }
+    return q
+
+
+def _sanitize_scenario(s: Any, dimension: str, difficulty_hint: int | None) -> dict[str, Any] | None:
+    """校验/归一化 LLM 返回的场景 JSON；不合法返回 None。"""
+    if not isinstance(s, dict) or not s.get("title"):
+        return None
+    s.setdefault("dimension", dimension)
+    s.setdefault("difficulty", difficulty_hint or 3)
+    s.setdefault("environment", "")
+    s.setdefault("stakes", "")
+    s.setdefault("ideal", "")
+    s.setdefault("pressure", {"level": 3, "desc": ""})
+    npc = s.get("npc")
+    if not isinstance(npc, dict):
+        npc = {}
+        s["npc"] = npc
+    npc.setdefault("role", "上级")
+    npc.setdefault("persona", "")
+    npc.setdefault("opening", "「说说你的情况。」")
+    npc.setdefault("mock_lines", ["（等待你的回应）"])
+    pressure = s.get("pressure")
+    if not isinstance(pressure, dict) or not isinstance(pressure.get("level", 3), int):
+        s["pressure"] = {"level": 3, "desc": ""}
+    return s
+
+
+def generate_scenario(
+    llm: Any,
+    role_prompt: str,
+    dimension: str | None = None,
+    difficulty_hint: int | None = None,
+    domain: str = DEFAULT_DOMAIN,
+    goal: str = "",
+    user_profile: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """生成一个职场情景副本（老板人设/环境/事件/利害压力）。Mock 走场景库确定性拼装。"""
+    ctx = {
+        "domain": domain,
+        "dimension": dimension,
+        "difficulty_hint": difficulty_hint,
+        "goal": goal,
+        "user_profile": user_profile or {},
+    }
+    raw = llm.complete(
+        role_prompt,
+        with_ctx(ctx, with_task("spar_scene", "生成一个职场情景副本（只输出 JSON）")),
+    )
+    try:
+        s = _sanitize_scenario(json.loads(raw), dimension, difficulty_hint)
+        if s is not None:
+            return s
+    except (ValueError, TypeError):
+        pass
+    return pick_scenario(domain, dimension)
 
 
 def search_knowledge(kb: KnowledgeBase, query: str, top_k: int = 3) -> list[KnowledgeHit]:
     return kb.retrieve(query, top_k=top_k)
-
-
-def get_scenario(
-    domain: str = DEFAULT_DOMAIN, dimension: str | None = None, difficulty_hint: int | None = None
-) -> dict[str, Any]:
-    """按维度取情景副本；无匹配则取首个。"""
-    scenarios = _load_scenarios(domain)
-    if dimension:
-        for s in scenarios:
-            if s["dimension"] == dimension:
-                return s
-    for s in scenarios:
-        if difficulty_hint and s.get("difficulty") == difficulty_hint:
-            return s
-    return scenarios[0]
 
 
 def load_profile(db: Any, learner_id: str) -> dict[str, Any] | None:

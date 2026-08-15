@@ -12,7 +12,7 @@ from langgraph.types import interrupt
 
 from selfgrow.agents.roles import get_role
 from selfgrow.agents.runtime import Runtime
-from selfgrow.agents.state import AgentState
+from selfgrow.agents.state import AgentState, build_hud
 from selfgrow.agents.tools import call_tool, save_record, search_knowledge
 from selfgrow.llm.base import with_ctx, with_task
 
@@ -49,14 +49,18 @@ def learn_node(state: AgentState, rt: Runtime) -> dict[str, Any]:
     )
 
     # 3) 中断：收集用户下一步
+    hud = build_hud(state, "learn", week=week, stage_label=f"拜师学艺 · W{week}")
     action = interrupt(
         {
             "learn": {
                 "week": week,
                 "dimension_name": dim_name,
                 "lesson": lesson,
+                "milestone": week_info.get("milestone", ""),
+                "challenge": week_info.get("challenge", ""),
                 "options": ["继续问", "去演练", "复盘"],
                 "banner": role.banner(),
+                "hud": hud,
             }
         }
     )
